@@ -28,6 +28,9 @@
   "nav": {
     "home": "首页",
     "kbs": "知识库",
+    "allKbs": "全部知识库",
+    "chatHistory": "聊天记录",
+    "allChats": "全部会话",
     "settings": "设置"
   },
   "titlebar": {

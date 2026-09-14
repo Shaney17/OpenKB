@@ -389,6 +389,10 @@ class KbSummaryItem(BaseModel):
     document_count: int = 0
     last_compile: str | None = None
     has_raw: bool = False
+    source_type: str = "local"
+    space_count: int = 0
+    source_labels: list[str] = Field(default_factory=list)
+    sync_status: str | None = None
 
 
 class KbListResponse(BaseModel):

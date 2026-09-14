@@ -456,6 +456,7 @@ export default function ChatSession() {
       for await (const event of stream) {
         patch((t) => foldSseEvent(t, event, activeKb))
         if (event.event === "final" && typeof event.data?.session_id === "string") {
+          window.dispatchEvent(new CustomEvent("openkb:reload-sessions"))
           const sid = event.data.session_id as string
           if (sid && sid !== sessionIdRef.current) {
             sessionIdRef.current = sid

@@ -2996,6 +2996,39 @@ def test_kbs_discovery_unions_root_and_registered_deduped(monkeypatch, tmp_path)
     assert paths["outside-kb"] == str(outside.resolve())
 
 
+def test_kbs_list_reports_confluence_source_and_rollup_status(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    local = root / "local-kb"
+    project = root / "project-kb"
+    _make_kb(local)
+    _make_kb(project)
+    (project / ".openkb" / "confluence-project.json").write_text(
+        json.dumps(
+            {
+                "spaces": {
+                    "PM": {"status": "succeeded"},
+                    "OPS": {"status": "partial"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = _client(monkeypatch)
+    items = {
+        item["name"]: item
+        for item in client.get("/api/v1/kbs", headers=_auth()).json()["knowledge_bases"]
+    }
+    assert items["local-kb"]["source_type"] == "local"
+    assert items["local-kb"]["sync_status"] is None
+    assert items["project-kb"]["source_type"] == "confluence"
+    assert items["project-kb"]["space_count"] == 2
+    assert items["project-kb"]["source_labels"] == ["OPS", "PM"]
+    assert items["project-kb"]["sync_status"] == "partial"
+
+
 def test_kbs_discovery_skips_stale_registered_entry(monkeypatch, tmp_path):
     from openkb.config import register_kb_alias
 

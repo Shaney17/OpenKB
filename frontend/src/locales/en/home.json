@@ -3,5 +3,21 @@
   "ready": "Knowledge compiled · <0>{{docs}}</0> docs · <1>{{kbs}}</1> KBs",
   "recentSessions": "Recent sessions",
   "untitledSession": "Untitled session",
-  "tagline": "Powered by OpenKB · your knowledge is always plain Markdown, and always yours"
+  "tagline": "Powered by OpenKB · your knowledge is always plain Markdown, and always yours",
+  "workspace": "Workspace",
+  "title": "Chat history",
+  "subtitle": "{{chats}} conversations across {{kbs}} knowledge bases",
+  "searchPlaceholder": "Search conversations",
+  "newChat": "New chat",
+  "newChatInKb": "New chat in {{kb}}",
+  "groupMeta": "{{chats}} chats · {{docs}} documents",
+  "turns_one": "{{count}} turn",
+  "turns_other": "{{count}} turns",
+  "noChatsInKb": "No conversations yet. Start one using the composer below.",
+  "noChatsMatch": "No conversations match your search in this KB.",
+  "noSearchResults": "No matching conversations.",
+  "noKbs": "Create a knowledge base to start chatting.",
+  "loadError": "Could not load knowledge bases.",
+  "sessionsLoadError": "Could not load chat history for this KB.",
+  "viewAllChats": "View all {{total}} chats"
 }

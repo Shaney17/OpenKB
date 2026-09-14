@@ -3,5 +3,21 @@
   "ready": "知识已编译就绪 · <0>{{docs}}</0> 篇文档 · <1>{{kbs}}</1> 个知识库",
   "recentSessions": "最近会话",
   "untitledSession": "未命名会话",
-  "tagline": "由 OpenKB 驱动 · 你的知识始终是纯 Markdown，归你所有"
+  "tagline": "由 OpenKB 驱动 · 你的知识始终是纯 Markdown，归你所有",
+  "workspace": "工作区",
+  "title": "聊天记录",
+  "subtitle": "{{kbs}} 个知识库中的 {{chats}} 个会话",
+  "searchPlaceholder": "搜索会话",
+  "newChat": "新建对话",
+  "newChatInKb": "在 {{kb}} 中新建对话",
+  "groupMeta": "{{chats}} 个会话 · {{docs}} 篇文档",
+  "turns_one": "{{count}} 轮",
+  "turns_other": "{{count}} 轮",
+  "noChatsInKb": "暂无会话。可在下方输入框开始。",
+  "noChatsMatch": "此知识库没有匹配的会话。",
+  "noSearchResults": "没有匹配的会话。",
+  "noKbs": "创建知识库后即可开始对话。",
+  "loadError": "无法加载知识库。",
+  "sessionsLoadError": "无法加载此知识库的聊天记录。",
+  "viewAllChats": "查看全部 {{total}} 个会话"
 }

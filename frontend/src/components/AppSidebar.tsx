@@ -1,129 +1,103 @@
-import { useEffect, useState } from "react"
-import { NavLink, useNavigate } from "react-router"
+import { useState } from "react"
+import { NavLink, useLocation, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
-import { MessageSquare, Library, Settings2, Plus } from "lucide-react"
-import { listKbs, type KbSummary } from "@/api/kb"
-import { cn } from "@/lib/utils"
+import { ChevronDown, Library, MessageSquare, Plus, Settings2 } from "lucide-react"
 import CreateKbDialog from "@/components/CreateKbDialog"
-
-/** Decorative accent colors, cycled by position — the API carries no color. */
-const DOTS = [
-  "bg-blue-500",
-  "bg-emerald-500",
-  "bg-amber-500",
-  "bg-violet-500",
-  "bg-rose-500",
-]
-const dotFor = (i: number) => DOTS[i % DOTS.length]
-
-function NavItem({
-  to,
-  icon,
-  label,
-  end,
-}: {
-  to: string
-  icon: React.ReactNode
-  label: string
-  end?: boolean
-}) {
-  return (
-    <NavLink
-      to={to}
-      end={end}
-      className={({ isActive }) =>
-        cn(
-          "flex items-center gap-2.5 px-3 h-9 rounded-apple-sm text-[14px] font-medium transition-colors duration-fast ease-out-apple active:scale-[0.98]",
-          isActive
-            ? "bg-accent text-accent-foreground shadow-sm"
-            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-        )
-      }
-    >
-      {icon}
-      {label}
-    </NavLink>
-  )
-}
+import { useChatHistory } from "@/hooks/useChatHistory"
+import { cn } from "@/lib/utils"
 
 export default function AppSidebar() {
   const navigate = useNavigate()
-  const { t } = useTranslation("common")
-  const [kbs, setKbs] = useState<KbSummary[]>([])
+  const location = useLocation()
+  const { t } = useTranslation(["common", "home"])
+  const { groups, loading, error, reload } = useChatHistory()
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const activeKb = (location.state as { kbId?: string } | null)?.kbId
+  const activeId = location.pathname.startsWith("/chat/")
+    ? decodeURIComponent(location.pathname.slice("/chat/".length)) : ""
 
-  // Fetch on mount, and re-fetch whenever a KB is created elsewhere (the
-  // `openkb:reload-kbs` window event dispatched by CreateKbDialog) so a new KB
-  // shows up without a full reload.
-  useEffect(() => {
-    let cancelled = false
-    const load = () => {
-      listKbs()
-        .then((r) => {
-          if (!cancelled) setKbs(r.knowledge_bases)
-        })
-        .catch(() => {
-          if (!cancelled) setKbs([])
-        })
-    }
-    load()
-    window.addEventListener('openkb:reload-kbs', load)
-    return () => {
-      cancelled = true
-      window.removeEventListener('openkb:reload-kbs', load)
-    }
-  }, [])
+  const navClass = ({ isActive }: { isActive: boolean }) => cn(
+    "flex h-9 items-center gap-2.5 rounded-apple-sm px-3 text-[13.5px] font-medium transition-colors",
+    isActive ? "bg-accent text-accent-foreground shadow-sm" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+  )
 
   return (
-    <aside className="glass m-2 mr-0 hidden w-[236px] shrink-0 flex-col rounded-apple-lg px-3 pb-3 pt-2 md:flex">
-      {/* 品牌 */}
-      <div className="flex items-center gap-2 px-2 h-10 mb-1">
-        <div className="w-6 h-6 rounded-apple-sm bg-accent-brand text-white grid place-items-center text-[13px] font-extrabold tracking-tighter">
-          K
-        </div>
+    <aside className="glass m-2 mr-0 hidden w-[266px] shrink-0 flex-col rounded-apple-lg px-3 pb-3 pt-2 md:flex">
+      <div className="mb-5 flex h-10 items-center gap-2 px-2">
+        <div className="grid size-6 place-items-center rounded-apple-sm bg-accent-brand text-[13px] font-extrabold text-white">K</div>
         <div className="text-[15px] font-bold tracking-tight">OpenKB Studio</div>
       </div>
 
-      {/* 主导航（不含设置，设置已下沉到底部） */}
-      <nav className="space-y-0.5">
-        <NavItem to="/" end icon={<MessageSquare className="w-4 h-4" />} label={t("nav.home")} />
-        <NavItem to="/kb" icon={<Library className="w-4 h-4" />} label={t("nav.kbs")} />
-      </nav>
-
-      {/* 知识库列表 */}
-      <div className="mt-5 px-3 flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-muted-foreground tracking-wide">
-          {t("nav.kbs")}
-        </span>
+      <div className="flex items-center justify-between px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        {t("nav.kbs")}
         <CreateKbDialog>
-          <button
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            title={t("actions.newKb")}
-          >
-            <Plus className="w-3.5 h-3.5" />
+          <button aria-label={t("actions.newKb")} title={t("actions.newKb")} className="rounded p-1 hover:bg-accent hover:text-foreground">
+            <Plus className="size-3.5" />
           </button>
         </CreateKbDialog>
       </div>
-      <div className="mt-1 space-y-0.5 overflow-y-auto">
-        {kbs.map((kb, i) => (
-          <button
-            key={kb.name}
-            onClick={() => navigate(`/kb/${encodeURIComponent(kb.name)}`)}
-            className="w-full flex items-center gap-2.5 px-3 h-9 rounded-apple-sm text-[13.5px] text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors duration-fast ease-out-apple active:scale-[0.98]"
-          >
-            <span className={cn("w-2 h-2 rounded-full shrink-0", dotFor(i))} />
-            <span className="truncate">{kb.name}</span>
-            <span className="ml-auto text-[11px] text-muted-foreground font-mono2 tabular-nums">
-              {kb.document_count}
-            </span>
-          </button>
-        ))}
+      <nav className="mt-1">
+        <NavLink to="/kb" className={navClass}><Library className="size-4" />{t("nav.allKbs")}</NavLink>
+      </nav>
+
+      <div className="mt-6 flex items-center justify-between px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        {t("nav.chatHistory")}
+        <button onClick={() => navigate("/")} aria-label={t("nav.allChats")} title={t("nav.allChats")} className="rounded p-1 hover:bg-accent hover:text-foreground">
+          <MessageSquare className="size-3.5" />
+        </button>
       </div>
+      <nav className="mt-1 min-h-0 flex-1 overflow-y-auto">
+        <NavLink to="/" end className={navClass}><MessageSquare className="size-4" />{t("nav.allChats")}</NavLink>
+        {loading && groups.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">{t("loading")}</p>}
+        {error && <button onClick={reload} className="px-3 py-2 text-left text-xs text-destructive underline">{t("home:loadError")}</button>}
+        {groups.map(({ kb, sessions, error: sessionError }) => {
+          const isOpen = expanded[kb.name] ?? true
+          return (
+            <div key={kb.name} className="mt-2">
+              <div className="group flex items-center rounded-apple-sm hover:bg-accent/60">
+                <button
+                  onClick={() => setExpanded((current) => ({ ...current, [kb.name]: !isOpen }))}
+                  aria-expanded={isOpen}
+                  aria-label={`${kb.name}: ${t("nav.chatHistory")}`}
+                  className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-[12.5px] font-semibold"
+                >
+                  <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !isOpen && "-rotate-90")} />
+                  <span className="truncate">{kb.name}</span>
+                  <span className="ml-auto text-[11px] font-normal tabular-nums text-muted-foreground">{sessions.length}</span>
+                </button>
+                <button
+                  onClick={() => navigate("/", { state: { kbId: kb.name } })}
+                  title={t("home:newChatInKb", { kb: kb.name })}
+                  aria-label={t("home:newChatInKb", { kb: kb.name })}
+                  className="mr-1 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                ><Plus className="size-3.5" /></button>
+              </div>
+              {isOpen && (
+                <div className="ml-5 border-l border-[hsl(var(--glass-border))] pl-1">
+                  {sessionError && <button onClick={reload} className="px-3 py-2 text-xs text-destructive underline">{t("home:sessionsLoadError")}</button>}
+                  {!sessionError && sessions.length === 0 && <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("home:noChatsInKb")}</p>}
+                  {sessions.slice(0, 12).map((session) => (
+                    <NavLink
+                      key={session.id}
+                      to={`/chat/${encodeURIComponent(session.id)}`}
+                      state={{ kbId: kb.name }}
+                      title={session.title || t("home:untitledSession")}
+                      className={cn(
+                        "block truncate rounded-apple-sm px-3 py-1.5 text-[12.5px] text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                        activeId === session.id && activeKb === kb.name && "bg-accent text-foreground",
+                      )}
+                    >{session.title || t("home:untitledSession")}</NavLink>
+                  ))}
+                  {sessions.length > 12 && <button onClick={() => navigate("/")} className="px-3 py-2 text-[11px] font-semibold text-accent-brand hover:underline">{t("home:viewAllChats", { total: sessions.length })}</button>}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </nav>
 
-      <div className="flex-1" />
-
-      {/* 底部：设置（主题切换已上移到全局右上角浮层） */}
-      <div className="space-y-1.5">
-        <NavItem to="/settings" icon={<Settings2 className="w-4 h-4" />} label={t("nav.settings")} />
+      <div className="border-t border-[hsl(var(--glass-border))] pt-2">
+        <NavLink to="/settings" className={navClass}><Settings2 className="size-4" />{t("nav.settings")}</NavLink>
       </div>
     </aside>
   )

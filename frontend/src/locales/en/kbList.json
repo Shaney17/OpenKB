@@ -9,6 +9,12 @@
   "docsLabel": "Docs",
   "rawReady": "raw/ ready",
   "rawMissing": "No raw/",
+  "columns": { "kb": "Knowledge base", "source": "Sync source", "status": "Status", "docs": "Documents" },
+  "confluenceSpaces_one": "Confluence · {{count}} space",
+  "confluenceSpaces_other": "Confluence · {{count}} spaces",
+  "localFiles": "Local files",
+  "localStatus": "Local",
+  "syncStatus": { "idle": "Not synced", "running": "Syncing", "succeeded": "Synced", "partial": "Partially synced", "failed": "Sync failed" },
   "create": {
     "description": "Give your new knowledge base a name. Model and credentials inherit the global defaults and can be adjusted later in its settings.",
     "nameLabel": "Name",

@@ -30,7 +30,8 @@ def _kb_list_item(kb_dir: Path, name: str) -> dict[str, Any]:
     # A Confluence project keeps its documents in child space KBs, so its own
     # hashes.json is empty and the switcher showed a fully-synced project as
     # "0". Roll the children up instead.
-    roots = [space_dir(kb_dir, key) for key in sorted(configured_spaces(kb_dir))] or [kb_dir]
+    spaces = configured_spaces(kb_dir)
+    roots = [space_dir(kb_dir, key) for key in sorted(spaces)] or [kb_dir]
     doc_count = 0
     for root in roots:
         hashes_file = root / ".openkb" / "hashes.json"
@@ -55,12 +56,27 @@ def _kb_list_item(kb_dir: Path, name: str) -> dict[str, Any]:
                 continue
     if mtimes:
         last_compile = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(max(mtimes)))
+    statuses = {str(space.get("status") or "idle") for space in spaces.values()}
+    if "running" in statuses:
+        sync_status = "running"
+    elif "failed" in statuses:
+        sync_status = "failed"
+    elif "partial" in statuses:
+        sync_status = "partial"
+    elif statuses == {"succeeded"}:
+        sync_status = "succeeded"
+    else:
+        sync_status = "idle" if spaces else None
     return {
         "name": name,
         "path": str(kb_dir),
         "document_count": doc_count,
         "last_compile": last_compile,
         "has_raw": (kb_dir / "raw").is_dir(),
+        "source_type": "confluence" if spaces else "local",
+        "space_count": len(spaces),
+        "source_labels": [str(space.get("label") or key) for key, space in sorted(spaces.items())],
+        "sync_status": sync_status,
     }
 
 
