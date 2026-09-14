@@ -1,8 +1,9 @@
 import { useState } from "react"
 import { NavLink, useLocation, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
-import { ChevronDown, Library, MessageSquare, Plus, Settings2 } from "lucide-react"
+import { ChevronDown, Library, Plus, Search, Settings2 } from "lucide-react"
 import CreateKbDialog from "@/components/CreateKbDialog"
+import ChatSearchDialog from "@/components/ChatSearchDialog"
 import { useChatHistory } from "@/hooks/useChatHistory"
 import { cn } from "@/lib/utils"
 
@@ -12,6 +13,9 @@ export default function AppSidebar() {
   const { t } = useTranslation(["common", "home"])
   const { groups, loading, error, reload } = useChatHistory()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const openSearch = (query = "") => { setSearchQuery(query); setSearchOpen(true) }
   const activeKb = (location.state as { kbId?: string } | null)?.kbId
   const activeId = location.pathname.startsWith("/chat/")
     ? decodeURIComponent(location.pathname.slice("/chat/".length)) : ""
@@ -42,12 +46,12 @@ export default function AppSidebar() {
 
       <div className="mt-6 flex items-center justify-between px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
         {t("nav.chatHistory")}
-        <button onClick={() => navigate("/")} aria-label={t("nav.allChats")} title={t("nav.allChats")} className="rounded p-1 hover:bg-accent hover:text-foreground">
-          <MessageSquare className="size-3.5" />
+        <button onClick={() => openSearch()} aria-label={t("home:searchTitle")} title={t("home:searchTitle")} className="rounded p-1 hover:bg-accent hover:text-foreground">
+          <Search className="size-3.5" />
         </button>
       </div>
       <nav className="mt-1 min-h-0 flex-1 overflow-y-auto">
-        <NavLink to="/" end className={navClass}><MessageSquare className="size-4" />{t("nav.allChats")}</NavLink>
+        <NavLink to="/" end className={navClass}><Plus className="size-4" />{t("nav.newChat")}</NavLink>
         {loading && groups.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">{t("loading")}</p>}
         {error && <button onClick={reload} className="px-3 py-2 text-left text-xs text-destructive underline">{t("home:loadError")}</button>}
         {groups.map(({ kb, sessions, error: sessionError }) => {
@@ -88,7 +92,7 @@ export default function AppSidebar() {
                       )}
                     >{session.title || t("home:untitledSession")}</NavLink>
                   ))}
-                  {sessions.length > 12 && <button onClick={() => navigate("/")} className="px-3 py-2 text-[11px] font-semibold text-accent-brand hover:underline">{t("home:viewAllChats", { total: sessions.length })}</button>}
+                  {sessions.length > 12 && <button onClick={() => openSearch(kb.name)} className="px-3 py-2 text-[11px] font-semibold text-accent-brand hover:underline">{t("home:viewAllChats", { total: sessions.length })}</button>}
                 </div>
               )}
             </div>
@@ -99,6 +103,7 @@ export default function AppSidebar() {
       <div className="border-t border-[hsl(var(--glass-border))] pt-2">
         <NavLink to="/settings" className={navClass}><Settings2 className="size-4" />{t("nav.settings")}</NavLink>
       </div>
+      <ChatSearchDialog open={searchOpen} onOpenChange={setSearchOpen} query={searchQuery} onQueryChange={setSearchQuery} groups={groups} loading={loading} error={error} />
     </aside>
   )
 }
