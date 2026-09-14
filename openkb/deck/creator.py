@@ -54,9 +54,8 @@ async def run_deck_create(
 
     Args:
         skill_name: Which deck skill to run. Defaults to the built-in
-            ``openkb-deck-neon``. Pass ``"deck-guizang-editorial"``
-            etc. to route to a third-party skill installed under
-            ``~/.openkb/skills/``.
+            ``openkb-deck-neon``. Pass ``"openkb-deck-editorial"`` etc.
+            to route to another skill bundled with OpenKB.
 
     Returns the :class:`SkillRunResult` from the producer skill (carries
     ``output_path`` and ``validation`` populated by ``run_skill`` per
@@ -87,9 +86,8 @@ async def run_deck_create(
         )
     except SkillNotFoundError as exc:
         raise RuntimeError(
-            f"Deck skill {skill_name!r} is not installed. "
-            f"Drop a SKILL.md into ~/.openkb/skills/{skill_name}/ (or "
-            f"<kb>/skills/{skill_name}/) and re-run."
+            f"Deck skill {skill_name!r} is not bundled with OpenKB. "
+            f"Add a SKILL.md under the repo's skills/{skill_name}/ and re-run."
         ) from exc
 
     if critique:

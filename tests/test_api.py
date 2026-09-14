@@ -64,6 +64,19 @@ def test_configured_token_is_enforced(monkeypatch, tmp_path):
     assert response.status_code == 401
 
 
+def test_web_ui_session_uses_httponly_cookie(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENKB_KB_ROOT", str(tmp_path))
+    client = _client(monkeypatch, token="secret")
+
+    session = client.post("/api/v1/ui/session")
+    response = client.get("/api/v1/kbs")
+
+    assert session.status_code == 204
+    assert "httponly" in session.headers["set-cookie"].lower()
+    assert "secret" not in session.headers["set-cookie"]
+    assert response.status_code == 200
+
+
 def test_api_rejects_missing_or_invalid_token(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
@@ -277,6 +290,12 @@ def test_init_endpoint_creates_named_kb_under_env_root(monkeypatch, tmp_path):
     assert payload["created"] is True
     assert payload["env_written"] == {"api_key": False, "openai_api_base": False}
     assert (kb_dir / ".openkb" / "config.yaml").is_file()
+    local_config = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    assert local_config == {"model": "gpt-5.4-mini"}
+    effective = client.get("/api/v1/kb/config", params={"kb": "postman-kb"}, headers=_auth()).json()
+    assert effective["sources"]["model"] == "kb"
+    assert effective["sources"]["language"] == "default"
+    assert effective["sources"]["pageindex_threshold"] == "default"
     assert (kb_dir / "wiki" / "AGENTS.md").is_file()
     global_config = yaml.safe_load((tmp_path / "global.yaml").read_text(encoding="utf-8"))
     assert global_config["kb_aliases"] == {"postman-kb": str(kb_dir.resolve())}
@@ -365,18 +384,20 @@ def test_init_endpoint_writes_env_without_leaking_values(monkeypatch, tmp_path):
     )
 
 
-def test_init_endpoint_inherits_project_root_config(monkeypatch, tmp_path):
-    # A KB created from the REST UI (no explicit params) should inherit the
-    # operator's project-root config.yaml and LLM credentials from .env, so it
-    # can run queries/compiles out of the box. Server-level OPENKB_* vars are
-    # filtered out of the inherited .env.
+def test_init_endpoint_inherits_scalar_defaults_without_enabling_overrides(monkeypatch, tmp_path):
+    # A KB created from the REST UI should leave layered scalar fields absent,
+    # so project override switches start OFF. Non-layered runtime config and
+    # LLM credentials still inherit from the operator project root.
     client = _client(monkeypatch)
     root = tmp_path / "api-kbs"
     kb_dir = root / "templated-kb"
     # Simulate the project root: deploy a config.yaml + .env at CWD.
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config.yaml").write_text(
-        "model: openai/deepseek-v4-flash\nlanguage: zh\npageindex_threshold: 20\n",
+        "model: openai/deepseek-v4-flash\n"
+        "language: zh\n"
+        "pageindex_threshold: 20\n"
+        "litellm:\n  drop_params: true\n",
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text(
@@ -395,10 +416,17 @@ def test_init_endpoint_inherits_project_root_config(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["env_written"] == {"api_key": True, "openai_api_base": True}
-    # config.yaml inherited verbatim (model/language preserved, not gpt-5.4/en).
+    # Scalar values are inherited through the global/default layers, not copied
+    # as KB overrides. Runtime-only settings remain available to the KB.
     config = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text("utf-8"))
-    assert config["model"] == "openai/deepseek-v4-flash"
-    assert config["language"] == "zh"
+    assert "model" not in config
+    assert "language" not in config
+    assert "pageindex_threshold" not in config
+    assert config["litellm"] == {"drop_params": True}
+    kb_config = client.get(
+        "/api/v1/kb/config", params={"kb": "templated-kb"}, headers=_auth()
+    ).json()
+    assert all(source != "kb" for source in kb_config["sources"].values())
     # .env inherited LLM creds but dropped server-level OPENKB_* vars.
     env_text = (kb_dir / ".env").read_text(encoding="utf-8")
     assert "LLM_API_KEY=sk-inherited" in env_text
@@ -824,6 +852,8 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
     assert response.status_code == 200
     payload = response.json()
     assert payload["document_count"] == 2
+    # `space` is null on a plain KB — it only carries a value for a project KB
+    # whose inventory is federated across child space KBs.
     assert payload["documents"] == [
         {
             "hash": "abc123",
@@ -831,6 +861,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
             "type": "pdf",
             "display_type": "short",
             "pages": 12,
+            "space": None,
         },
         {
             "hash": "def456",
@@ -838,6 +869,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
             "type": "md",
             "display_type": "short",
             "pages": None,
+            "space": None,
         },
     ]
     assert payload["summaries"] == ["paper"]
@@ -2001,6 +2033,69 @@ def test_page_endpoint_rejects_path_traversal(monkeypatch, kb_dir):
 
     response = client.post(
         "/api/v1/page", json={"kb": kb, "path": "../../../etc/passwd"}, headers=_auth()
+    )
+
+    assert response.status_code == 400
+
+
+def _add_space(kb_dir, key, pages):
+    """Give ``kb_dir`` a Confluence child space KB holding ``{path: text}``."""
+    import json as _json
+
+    child = kb_dir / ".openkb" / "spaces" / key.lower()
+    (child / ".openkb").mkdir(parents=True)
+    (child / "wiki").mkdir(parents=True)
+    for rel, text in pages.items():
+        target = child / "wiki" / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    (kb_dir / ".openkb" / "confluence-project.json").write_text(
+        _json.dumps({"version": 1, "connection": {}, "spaces": {key: {"ref": key, "key": key}}}),
+        encoding="utf-8",
+    )
+
+
+def test_page_endpoint_reads_from_a_project_space(monkeypatch, kb_dir):
+    """A project KB's own wiki is empty by design; `space` reads the child KB
+    the Confluence sync actually compiled into, so a chat source chip opens."""
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(kb_dir, "PM", {"concepts/orderbook.md": "# Order book"})
+
+    response = client.post(
+        "/api/v1/page",
+        json={"kb": kb, "path": "concepts/orderbook", "space": "PM"},
+        headers=_auth(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "# Order book"
+
+
+def test_page_endpoint_404s_on_a_space_not_in_the_project(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(kb_dir, "PM", {"concepts/orderbook.md": "# Order book"})
+
+    response = client.post(
+        "/api/v1/page",
+        json={"kb": kb, "path": "concepts/orderbook", "space": "NOPE"},
+        headers=_auth(),
+    )
+
+    assert response.status_code == 404
+
+
+def test_page_endpoint_space_read_cannot_escape_the_space_wiki(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(kb_dir, "PM", {})
+    (kb_dir / ".openkb" / "spaces" / "pm" / "secret.md").write_text("s", encoding="utf-8")
+
+    response = client.post(
+        "/api/v1/page",
+        json={"kb": kb, "path": "../secret", "space": "PM"},
+        headers=_auth(),
     )
 
     assert response.status_code == 400
@@ -3414,3 +3509,57 @@ def test_delete_kb_filenotfound_is_idempotent(monkeypatch, tmp_path):
     )
     assert r.status_code == 200
     assert r.json()["deleted"] is True
+
+
+def test_list_endpoint_federates_a_project_kb(monkeypatch, kb_dir):
+    """A project KB's own wiki is empty by design; /list must report what its
+    child spaces hold, not an empty knowledge base."""
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(kb_dir, "PM", {"concepts/order-execution.md": "x", "entities/tcex.md": "x"})
+
+    response = client.post("/api/v1/list", json={"kb": kb}, headers=_auth())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["concepts"] == ["PM/order-execution"]
+    assert body["entities"] == ["PM/tcex"]
+
+
+def test_list_endpoint_leaves_a_plain_kb_alone(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    (kb_dir / "wiki" / "concepts" / "a.md").write_text("x", encoding="utf-8")
+
+    body = client.post("/api/v1/list", json={"kb": kb}, headers=_auth()).json()
+
+    assert body["concepts"] == ["a"]
+
+
+def test_page_endpoint_opens_a_space_qualified_path(monkeypatch, kb_dir):
+    """The path /list hands the UI must round-trip back to its child KB."""
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(kb_dir, "PM", {"concepts/order-execution.md": "# Order execution"})
+
+    response = client.post(
+        "/api/v1/page",
+        json={"kb": kb, "path": "concepts/PM/order-execution"},
+        headers=_auth(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "# Order execution"
+
+
+def test_page_endpoint_serves_a_generated_index_for_a_project(monkeypatch, kb_dir):
+    """The project's real index.md is the empty scaffold — serving it verbatim
+    is what made a fully-synced KB look broken."""
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(kb_dir, "PM", {"concepts/a.md": "x"})
+
+    body = client.post("/api/v1/page", json={"kb": kb, "path": "index.md"}, headers=_auth()).json()
+
+    assert "PM" in body["content"]
+    assert "not in the project's own wiki" in body["content"]

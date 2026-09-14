@@ -5,7 +5,8 @@ agent instructions) is loaded by ``run_skill``, which builds an Agent
 whose ``instructions`` are that body. The agent gets the standard wiki
 read-tool set plus a constrained ``write_file`` tool scoped to
 ``wiki/explorations/**`` and ``output/**``, and ``read_output_or_skill_file``
-for inspecting prior artifacts.
+for inspecting prior artifacts. ``read_skill_file`` reads the selected skill's
+supporting references without exposing other skill directories.
 
 This decouples generators from hard-coded prompts. ``openkb deck new`` /
 ``openkb skill new`` / any future ``openkb <type> new`` command becomes a
@@ -33,7 +34,7 @@ from typing import Any, Optional
 from agents import Runner, function_tool
 
 from openkb.agent.query import build_query_agent, build_run_config_from_bundle
-from openkb.agent.skills import _parse_frontmatter, scan_local_skills
+from openkb.agent.skills import _parse_frontmatter, read_skill_support_file, scan_local_skills
 from openkb.agent.tools import read_kb_file, write_kb_file
 from openkb.config import LlmCredentialBundle
 
@@ -101,8 +102,9 @@ async def run_skill(
             ``od.output_path_template`` (it substitutes ``{slug}``).
             Otherwise ignored.
         extra_skill_roots: Additional directories to scan beyond the
-            built-in ``<kb>/skills``, ``~/.openkb/skills``,
-            ``~/.claude/skills``.
+            skills bundled with OpenKB. Nothing outside the package is
+            scanned unless named here — OpenKB does not pick up skills
+            installed for other tools.
         bundle: Optional per-request LLM credential/config bundle. When
             provided (REST path), it is forwarded to the query agent so
             concurrent requests never share process-global credentials.
@@ -123,8 +125,8 @@ async def run_skill(
         available = ", ".join(sorted(s["name"] for s in skills)) or "(none)"
         raise SkillNotFoundError(
             f"Skill {skill_name!r} not found. Available: {available}. "
-            f"Drop a SKILL.md into ~/.openkb/skills/<name>/ or "
-            f"<kb>/skills/<name>/ and re-run."
+            f"OpenKB only loads the skills bundled with it; add one under "
+            f"the repo's skills/<name>/ or pass its directory explicitly."
         )
 
     skill_md = Path(match["path"]) / "SKILL.md"
@@ -144,7 +146,7 @@ async def run_skill(
 
     wiki_root = str(kb_dir / "wiki")
     kb_root = str(kb_dir)
-    base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    base = build_query_agent(wiki_root, model, language=language, bundle=bundle, kb_dir=kb_dir)
 
     @function_tool
     def write_file(path: str, content: str) -> str:
@@ -172,6 +174,19 @@ async def run_skill(
         """
         return read_kb_file(path, kb_root)
 
+    @function_tool
+    def read_skill_file(name: str, path: str) -> str:
+        """Read a supporting file from the skill currently being run.
+
+        Args:
+            name: The current skill name.
+            path: Path relative to the skill directory, such as
+                ``references/retrieval.md``.
+        """
+        if name != skill_name:
+            return f"Unknown skill: {name!r}. This run uses {skill_name!r}."
+        return read_skill_support_file(skill_md.parent, path)
+
     agent = base.clone(
         name=f"skill::{skill_name}",
         instructions=(base.instructions or "")
@@ -179,7 +194,7 @@ async def run_skill(
         + body
         + "\n\n## User intent\n\n"
         + intent,
-        tools=[*base.tools, write_file, read_output_or_skill_file],
+        tools=[*base.tools, write_file, read_output_or_skill_file, read_skill_file],
     )
 
     user_seed = seed or (

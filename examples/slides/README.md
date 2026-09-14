@@ -58,9 +58,11 @@ direction and a slide grammar. Two ship with OpenKB (no install needed):
 | [`openkb-deck-neon`](../../skills/openkb-deck-neon/SKILL.md) *(default)* | Dark "Aurora Glass" — near-black background, teal/sky/magenta/amber neon, glassmorphism panels. |
 | [`openkb-deck-editorial`](../../skills/openkb-deck-editorial/SKILL.md) | Warm "Editorial Monocle" — cream, serif, brick-red accent; a printed-page feel. |
 
-Want a custom look? Drop a third-party deck skill into `~/.openkb/skills/` or
-`<kb>/skills/` and select it with `--skill` (a same-named skill there overrides
-the built-in).
+Want a custom look? Add a deck skill under the repo's `skills/` directory and
+select it with `--skill`. OpenKB loads only the skills that ship with it — it
+does not scan `~/.claude/skills/` or any other tool's skill directory, so a
+knowledge base's output can never be steered by instructions installed for
+something else.
 
 ---
 

@@ -19,7 +19,7 @@ import time
 import uuid
 from functools import wraps
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import os
 
@@ -30,6 +30,7 @@ set_tracing_disabled(True)
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 import click
+import yaml
 
 
 # Silence LiteLLM's "could not pre-load <aws-service> response stream
@@ -51,6 +52,7 @@ from dotenv import load_dotenv
 from openkb.agent.compiler import DEFAULT_COMPILE_CONCURRENCY, compile_long_doc
 from openkb.config import (
     DEFAULT_CONFIG,
+    GLOBAL_SCALAR_KEYS,
     resolve_effective_config,
     save_config,
     load_global_config,
@@ -445,15 +447,31 @@ def _run_compile_with_retry(coro_factory, label: str) -> None:
 
 
 def add_single_file(
-    file_path: Path, kb_dir: Path, *, stage: bool = True, bundle=None
+    file_path: Path,
+    kb_dir: Path,
+    *,
+    stage: bool = True,
+    bundle=None,
+    on_error: Callable[[Exception], None] | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document under the KB mutation lock."""
     with kb_ingest_lock(kb_dir / ".openkb"):
-        return _add_single_file_locked(file_path, kb_dir, stage=stage, bundle=bundle)
+        return _add_single_file_locked(
+            file_path,
+            kb_dir,
+            stage=stage,
+            bundle=bundle,
+            on_error=on_error,
+        )
 
 
 def _add_single_file_locked(
-    file_path: Path, kb_dir: Path, *, stage: bool = True, bundle=None
+    file_path: Path,
+    kb_dir: Path,
+    *,
+    stage: bool = True,
+    bundle=None,
+    on_error: Callable[[Exception], None] | None = None,
 ) -> Literal["added", "skipped", "failed"]:
     """Convert, index, and compile a single document into the knowledge base.
 
@@ -491,6 +509,8 @@ def _add_single_file_locked(
     except Exception as exc:
         click.echo(f"  [ERROR] Conversion failed: {exc}")
         logger.debug("Conversion traceback:", exc_info=True)
+        if on_error is not None:
+            on_error(exc)
         _cleanup_staging_dirs([staging_dir])
         return "failed"
 
@@ -626,7 +646,7 @@ def _add_single_file_locked(
         },
         staging_dirs=[staging_dir],
     )
-    if not run_add_mutation(kb_dir, plan):
+    if not run_add_mutation(kb_dir, plan, on_error=on_error):
         return "failed"
     click.echo(f"  [OK] {file_path.name} added to knowledge base.")
     return "added"
@@ -1152,6 +1172,135 @@ def add(ctx, path, from_pageindex_cloud):
             )
             return
         add_single_file(target, kb_dir)
+
+
+# ---------------------------------------------------------------------------
+# External source synchronization
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def sync():
+    """Synchronize external content sources into the knowledge base."""
+
+
+@sync.command("confluence")
+@click.option(
+    "--base-url",
+    default=None,
+    help="Confluence site URL (or set CONFLUENCE_BASE_URL).",
+)
+@click.option(
+    "--email",
+    default=None,
+    help="Atlassian account email (or set CONFLUENCE_EMAIL).",
+)
+@click.option(
+    "--space",
+    "spaces",
+    multiple=True,
+    help="Space key to sync; repeat for multiple spaces.",
+)
+@click.option(
+    "--delete-missing",
+    is_flag=True,
+    default=False,
+    help="Remove previously-synced pages no longer returned by Confluence.",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Preview without changing the KB.")
+@click.option(
+    "--timeout",
+    type=click.FloatRange(min=1.0),
+    default=30.0,
+    show_default=True,
+    help="HTTP request timeout in seconds.",
+)
+@click.pass_context
+def sync_confluence_command(ctx, base_url, email, spaces, delete_missing, dry_run, timeout):
+    """Sync Confluence Cloud pages using an Atlassian API token.
+
+    The token is read only from CONFLUENCE_API_TOKEN so it is not exposed in
+    shell history or persisted in OpenKB metadata. BASE URL, email, and spaces
+    may also be stored under sources.confluence in .openkb/config.yaml.
+    """
+    from openkb.confluence import ConfluenceClient, ConfluenceError, sync_confluence
+    from openkb.locks import flock, funlock
+
+    kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
+    if kb_dir is None:
+        click.echo("No knowledge base found. Run `openkb init` first.", err=True)
+        ctx.exit(1)
+
+    # Loads <kb>/.env even when the command is launched from another working
+    # directory. It also prepares the LLM credentials needed by add_single_file.
+    _setup_llm_key(kb_dir)
+    config = resolve_effective_config(kb_dir)[0]
+    source_config = config.get("sources") or {}
+    confluence_config = (
+        source_config.get("confluence", {}) if isinstance(source_config, dict) else {}
+    )
+    if not isinstance(confluence_config, dict):
+        confluence_config = {}
+
+    base_url = (
+        base_url or os.environ.get("CONFLUENCE_BASE_URL") or confluence_config.get("base_url")
+    )
+    email = email or os.environ.get("CONFLUENCE_EMAIL") or confluence_config.get("email")
+    api_token = os.environ.get("CONFLUENCE_API_TOKEN", "")
+    selected_spaces = list(spaces)
+    if not selected_spaces:
+        configured_spaces = confluence_config.get("spaces")
+        if isinstance(configured_spaces, list):
+            selected_spaces = [str(item) for item in configured_spaces if str(item).strip()]
+        elif os.environ.get("CONFLUENCE_SPACES"):
+            selected_spaces = [
+                item.strip() for item in os.environ["CONFLUENCE_SPACES"].split(",") if item.strip()
+            ]
+
+    missing = []
+    if not base_url:
+        missing.append("--base-url / CONFLUENCE_BASE_URL")
+    if not email:
+        missing.append("--email / CONFLUENCE_EMAIL")
+    if not api_token:
+        missing.append("CONFLUENCE_API_TOKEN")
+    if not selected_spaces:
+        missing.append("--space (or sources.confluence.spaces)")
+    if missing:
+        click.echo(f"[ERROR] Missing Confluence settings: {', '.join(missing)}", err=True)
+        ctx.exit(1)
+
+    try:
+        client = ConfluenceClient(str(base_url), str(email), api_token, timeout=timeout)
+        # Serialize only Confluence sync runs. The normal per-document KB lock
+        # still protects add/remove while network fetching remains independent
+        # of unrelated OpenKB commands.
+        sync_lock = kb_dir / ".openkb" / "confluence-sync.lock"
+        with sync_lock.open("a+", encoding="utf-8") as lock_file:
+            flock(lock_file, exclusive=True)
+            try:
+                result = sync_confluence(
+                    kb_dir,
+                    client,
+                    selected_spaces,
+                    delete_missing=delete_missing,
+                    dry_run=dry_run,
+                )
+            finally:
+                funlock(lock_file)
+    except (ConfluenceError, ValueError) as exc:
+        click.echo(f"[ERROR] {exc}", err=True)
+        ctx.exit(1)
+
+    prefix = "Preview" if dry_run else "Synchronized"
+    click.echo(
+        f"{prefix} {result.discovered} Confluence page(s): "
+        f"{result.added} added, {result.updated} updated, "
+        f"{result.unchanged} unchanged, {result.deleted} deleted, "
+        f"{result.failed} failed."
+    )
+    if result.failed:
+        ctx.exit(1)
 
 
 def _stream_to_tty() -> bool:
@@ -3358,8 +3507,8 @@ def deck():
     # DEFAULT_DECK_SKILL in openkb/deck/creator.py.
     help=(
         "Which deck skill to use. Defaults to 'openkb-deck-neon' "
-        "(the built-in). Pass e.g. 'deck-guizang-editorial' to route to "
-        "a third-party skill installed under ~/.openkb/skills/."
+        "(the built-in). Pass e.g. 'openkb-deck-editorial' to route to "
+        "another deck skill bundled with OpenKB."
     ),
 )
 @click.pass_context
@@ -3533,6 +3682,7 @@ def initialize_kb(
     model: str | None = None,
     api_key: str | None = None,
     openai_api_base: str | None = None,
+    register: bool = True,
 ) -> dict[str, Any]:
     """Initialize a knowledge base at an explicit directory (REST ``/init``).
 
@@ -3558,27 +3708,24 @@ def initialize_kb(
     atomic_write_text(kb_dir / "wiki" / "log.md", "# Operations Log\n\n")
 
     openkb_dir.mkdir()
-    # Seed config.yaml: an explicit model wins; otherwise inherit the
-    # operator's project-root config.yaml (model/language/optional blocks)
-    # so a KB created via the REST UI matches the deployed setup instead of
-    # the hardcoded DEFAULT_CONFIG (gpt-5.4 / en). Defaults are the last resort.
+    # New REST-created KBs inherit scalar settings by default, so their project
+    # override switches start OFF. Preserve only non-layered runtime blocks
+    # (for example litellm/parallel_tool_calls) from the operator template;
+    # copying model/language/threshold would silently pin every new KB.
     template_config = Path.cwd() / "config.yaml"
+    config: dict[str, Any] = {}
+    if template_config.exists():
+        with template_config.open("r", encoding="utf-8") as fh:
+            template_values = yaml.safe_load(fh) or {}
+        if isinstance(template_values, dict):
+            config.update(
+                (key, value)
+                for key, value in template_values.items()
+                if key not in GLOBAL_SCALAR_KEYS
+            )
     if model is not None:
-        config = {
-            "model": model,
-            "language": DEFAULT_CONFIG["language"],
-            "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
-        }
-        save_config(openkb_dir / "config.yaml", config)
-    elif template_config.exists():
-        shutil.copy2(template_config, openkb_dir / "config.yaml")
-    else:
-        config = {
-            "model": DEFAULT_CONFIG["model"],
-            "language": DEFAULT_CONFIG["language"],
-            "pageindex_threshold": DEFAULT_CONFIG["pageindex_threshold"],
-        }
-        save_config(openkb_dir / "config.yaml", config)
+        config["model"] = model
+    save_config(openkb_dir / "config.yaml", config)
     atomic_write_json(openkb_dir / "hashes.json", {})
 
     # Seed KB-local .env: inherit LLM credentials from the project-root .env so
@@ -3614,7 +3761,8 @@ def initialize_kb(
             )
         os.chmod(env_path, 0o600)
 
-    register_kb(kb_dir)
+    if register:
+        register_kb(kb_dir)
     return {
         "kb_dir": str(kb_dir),
         "created": True,

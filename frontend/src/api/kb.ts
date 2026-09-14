@@ -14,8 +14,36 @@ export interface KbListResponse {
   knowledge_bases: KbSummary[]
 }
 
+function normalizeKbList(value: unknown): KbListResponse {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid knowledge base list response')
+  }
+  const response = value as Record<string, unknown>
+  if (!Array.isArray(response.knowledge_bases)) {
+    throw new Error('Invalid knowledge base list response')
+  }
+  const knowledge_bases = response.knowledge_bases.flatMap((item): KbSummary[] => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return []
+    const kb = item as Record<string, unknown>
+    if (typeof kb.name !== 'string' || !kb.name) return []
+    return [{
+      name: kb.name,
+      document_count: typeof kb.document_count === 'number' && Number.isFinite(kb.document_count)
+        ? kb.document_count
+        : 0,
+      last_compile: typeof kb.last_compile === 'string' ? kb.last_compile : null,
+      has_raw: kb.has_raw === true,
+      path: typeof kb.path === 'string' ? kb.path : undefined,
+    }]
+  })
+  return {
+    root: typeof response.root === 'string' ? response.root : '',
+    knowledge_bases,
+  }
+}
+
 export function listKbs(): Promise<KbListResponse> {
-  return apiFetch<KbListResponse>("/api/v1/kbs")
+  return apiFetch<unknown>("/api/v1/kbs").then(normalizeKbList)
 }
 
 /** Body for POST /api/v1/init. Only `kb` is required; model/credentials are

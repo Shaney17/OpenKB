@@ -2671,6 +2671,19 @@ class TestLLMCallExtraHeaders:
             _llm_call("m", [{"role": "user", "content": "hi"}], "step")
         assert "extra_headers" not in mock_litellm.completion.call_args.kwargs
 
+    def test_llm_call_qualifies_unknown_model_for_openai_compatible_base(self):
+        from openkb.agent.compiler import _llm_call
+        from openkb.config import LlmCredentialBundle
+
+        bundle = LlmCredentialBundle(
+            api_key="k", base_url="https://token-plan-sgp.xiaomimimo.com/v1"
+        )
+        with patch("openkb.agent.compiler.litellm") as mock_litellm:
+            mock_litellm.completion = MagicMock(side_effect=_mock_completion(["ok"]))
+            _llm_call("mimo-v2.5", [{"role": "user", "content": "hi"}], "step", bundle=bundle)
+
+        assert mock_litellm.completion.call_args.kwargs["model"] == "openai/mimo-v2.5"
+
     def test_llm_call_explicit_kwarg_wins_over_config(self):
         from openkb.agent.compiler import _llm_call
         from openkb.config import set_extra_headers

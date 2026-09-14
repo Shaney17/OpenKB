@@ -1,5 +1,6 @@
 {
   "settingsButton": "Knowledge base settings",
+  "confluenceSpaces": "Confluence spaces",
   "loadError": "Failed to load: {{error}}",
   "wikiNote": "wiki/ is a plain Markdown folder on this machine — your data is always yours",
   "reader": {

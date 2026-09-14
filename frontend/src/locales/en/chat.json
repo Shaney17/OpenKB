@@ -9,7 +9,9 @@
   "sources": {
     "heading": "Sources",
     "pageTip": "Click to view this wiki page",
-    "internalTip": "Internal content of a long document (PageIndex); no standalone page to open"
+    "internalTip": "Internal content of a long document (PageIndex); no standalone page to open",
+    "searchTip": "Keyword search across this project's Confluence spaces",
+    "failedTip": "This read returned nothing — the path does not exist in this knowledge base"
   },
   "reading": {
     "page": "Reading <0>{{label}}</0>",
@@ -17,7 +19,9 @@
     "thinking": "Thinking…"
   },
   "step": {
-    "read": "Read <0>{{path}}</0>"
+    "read": "Read <0>{{path}}</0>",
+    "searched": "Searched spaces for <0>{{path}}</0>",
+    "readFailed": "Could not read <0>{{path}}</0>"
   },
   "requestError": "Request failed: {{error}}",
   "savedTo": "Saved to {{path}}",

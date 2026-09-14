@@ -13,6 +13,35 @@ from pathlib import Path, PurePosixPath
 
 from openkb.locks import atomic_write_text
 
+#: Every prefix a read tool in this module returns *instead of* content when it
+#: could not deliver what was asked for. These functions report failure in-band
+#: (a plain string the model reads) rather than raising, so the agent can
+#: recover on its own turn — but that also means the Agents SDK sees a
+#: successful tool call, and without this table the UI would paint a green
+#: check on a read that found nothing. ``is_tool_failure`` is the one place
+#: that knowledge lives; keep it in step with the returns below.
+TOOL_FAILURE_PREFIXES = (
+    "Access denied:",
+    "File not found:",
+    "Image not found:",
+    "No files found.",
+    "No content found for pages ",
+    "Could not read ",
+    "Unknown skill:",
+    "Unknown space:",
+)
+
+
+def is_tool_failure(output: str) -> bool:
+    """True when a read tool's return value is one of its in-band failures.
+
+    Used by the SSE layer to emit an honest ``tool_result`` so a read that hit
+    a missing path renders as a failed step instead of a confirmed one.
+    """
+    if not isinstance(output, str):
+        return False
+    return output.startswith(TOOL_FAILURE_PREFIXES)
+
 
 def list_wiki_files(directory: str, wiki_root: str) -> str:
     """List all Markdown files in a wiki subdirectory.

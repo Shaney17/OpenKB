@@ -1,4 +1,4 @@
-import { apiFetch, apiStream, getToken, getApiBase } from "./client"
+import { apiFetch, apiStream, ensureUiSession, getApiBase } from "./client"
 import i18n from "@/lib/i18n"
 
 /** One file's outcome in an `/api/v1/add` response (`AddFileItem`). */
@@ -56,8 +56,8 @@ export type UploadEvent =
  * `onEvent` as the backend reports per-file progress over SSE.
  *
  * This does NOT go through `apiStream` because the body is `FormData`, not JSON
- * — but the bearer token must still be attached by hand so the request carries
- * `Authorization` when a token is set. The SSE frame parsing mirrors
+ * — but the HttpOnly UI session still needs to be bootstrapped before the
+ * multipart request. The SSE frame parsing mirrors
  * `apiStream` in `client.ts`. Events map to `_stream_add_uploads`:
  *   `file_start` → compile starting for one file,
  *   `file_done`  → that file's `AddFileItem` (status added/skipped/failed),
@@ -84,10 +84,10 @@ export async function streamUpload(
   form.append("kb", kb)
   form.append("stream", "true")
   files.forEach((f) => form.append("files", f))
-  const token = getToken()
+  await ensureUiSession()
   const res = await fetch(getApiBase().replace(/\/$/, "") + "/api/v1/add", {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
     body: form,
     signal,
   })

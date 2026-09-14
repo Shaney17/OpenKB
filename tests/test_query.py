@@ -307,6 +307,17 @@ class TestBuildRunConfigFromBundle:
         assert run_config.model.model == "openai/deepseek-v4-flash"
         assert not run_config.model.model.startswith("litellm/")
 
+    def test_openai_compatible_base_qualifies_unknown_model(self):
+        from openkb.agent.query import build_run_config_from_bundle
+        from openkb.config import LlmCredentialBundle
+
+        bundle = LlmCredentialBundle(
+            api_key="k", base_url="https://token-plan-sgp.xiaomimimo.com/v1"
+        )
+        run_config = build_run_config_from_bundle("mimo-v2.5", bundle)
+
+        assert run_config.model.model == "openai/mimo-v2.5"
+
 
 def test_chat_session_agent_has_write_file(tmp_path):
     from openkb.agent.chat import build_chat_session_agent

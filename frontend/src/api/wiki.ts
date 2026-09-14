@@ -22,6 +22,9 @@ export interface WikiDocument {
   type: string
   display_type: string
   pages: number | null
+  /** Confluence space this document came from — set only for a project KB,
+   *  whose inventory is federated across its child space KBs. */
+  space?: string | null
 }
 
 /**
@@ -30,6 +33,12 @@ export interface WikiDocument {
  * `summaries`, `concepts`, and `entities` are page *stems* (no `.md`);
  * `reports` are full file *names* (with `.md`). The endpoint now surfaces
  * `entities/` pages alongside the other wiki types.
+ *
+ * For a Confluence PROJECT KB the inventory is federated across its child
+ * space KBs and every name is qualified as `<SPACE>/<name>` (e.g.
+ * `PM/order-execution`). That qualified name flows straight back through
+ * `<type>/<name>` to `/api/v1/page`, which routes it to the right child KB —
+ * so nothing here needs to know about spaces.
  */
 export interface KbInventory {
   documents: WikiDocument[]
@@ -44,9 +53,17 @@ export function getGraph(kb: string): Promise<GraphData> {
   return apiFetch<GraphData>("/api/v1/graph", { body: { kb } })
 }
 
-/** Fetch one wiki page's Markdown. `path` is relative to `wiki/` (`.md` optional). */
-export function getPage(kb: string, path: string): Promise<{ path: string; content: string }> {
-  return apiFetch<{ path: string; content: string }>("/api/v1/page", { body: { kb, path } })
+/** Fetch one wiki page's Markdown. `path` is relative to `wiki/` (`.md` optional).
+ *  `space` reads from one of a project KB's Confluence child spaces instead of
+ *  the project's own (deliberately empty) wiki. */
+export function getPage(
+  kb: string,
+  path: string,
+  space?: string,
+): Promise<{ path: string; content: string }> {
+  return apiFetch<{ path: string; content: string }>("/api/v1/page", {
+    body: space ? { kb, path, space } : { kb, path },
+  })
 }
 
 export function getKbInventory(kb: string): Promise<KbInventory> {

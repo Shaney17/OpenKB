@@ -137,6 +137,9 @@ class DocumentItem(BaseModel):
     type: str
     display_type: str
     pages: int | None = None
+    # Which Confluence space this document came from, for a project KB whose
+    # inventory is federated across child space KBs. None for a plain KB.
+    space: str | None = None
 
 
 class ListResponse(BaseModel):
@@ -278,6 +281,10 @@ class GraphResponse(BaseModel):
 class PageRequest(BaseModel):
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
+    # Read from one of a project KB's Confluence child spaces instead of its
+    # own wiki/. Read-only: page delete/edit deliberately stay unscoped, so a
+    # mutation can never be aimed at a synchronized space by accident.
+    space: str | None = Field(default=None)
 
 
 class PageResponse(BaseModel):

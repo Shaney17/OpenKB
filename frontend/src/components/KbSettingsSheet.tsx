@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -19,6 +19,42 @@ import { UnLanguageDatalist, UN_LANG_LIST_ID } from '@/components/UnLanguageData
 import EntityTypesEditor from '@/components/EntityTypesEditor'
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const configSources = new Set<ConfigSource>(['kb', 'global', 'default'])
+
+function normalizeConfig(value: KbConfig): KbConfig {
+  const source = (candidate: ConfigSource | undefined): ConfigSource =>
+    candidate && configSources.has(candidate) ? candidate : 'default'
+  return {
+    ...value,
+    model: typeof value.model === 'string' ? value.model : '',
+    language: typeof value.language === 'string' ? value.language : 'en',
+    pageindex_threshold: Number.isFinite(value.pageindex_threshold) ? value.pageindex_threshold : 20,
+    entity_types: Array.isArray(value.entity_types) ? value.entity_types : [],
+    sources: {
+      model: source(value.sources?.model),
+      language: source(value.sources?.language),
+      pageindex_threshold: source(value.sources?.pageindex_threshold),
+      entity_types: source(value.sources?.entity_types),
+    },
+    global_values: {
+      model: value.global_values?.model ?? null,
+      language: value.global_values?.language ?? null,
+      pageindex_threshold: value.global_values?.pageindex_threshold ?? null,
+      entity_types: Array.isArray(value.global_values?.entity_types)
+        ? value.global_values.entity_types
+        : null,
+    },
+  }
+}
+
+class ConfigErrorBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() { return this.state.failed ? this.props.fallback : this.props.children }
+}
 
 /** Right-anchored settings sheet opened from KbDetail's header gear. Uses the
  *  D-era motion spring pattern (ArtifactPanel), NOT the CSS-animated Radix
@@ -115,7 +151,9 @@ export default function KbSettingsSheet({
                 </div>
 
                 <div className="flex-1 min-h-0 overflow-y-auto scroll-edge-top px-4 py-4 space-y-6">
-                  <KbConfigSection kb={kb} />
+                  <ConfigErrorBoundary fallback={<ConfigFallback />}>
+                    <KbConfigSection kb={kb} />
+                  </ConfigErrorBoundary>
                   <KbMaintenanceSection kb={kb} open={open} docCount={docCount} onChanged={onChanged} />
                   <KbDangerSection kb={kb} onDeleted={onDeleted} />
                 </div>
@@ -125,6 +163,16 @@ export default function KbSettingsSheet({
         )}
       </AnimatePresence>
     </Dialog.Root>
+  )
+}
+
+function ConfigFallback() {
+  const { t } = useTranslation('kbSettings')
+  return (
+    <div className="rounded-xl bg-red-50 px-3 py-3 text-[12.5px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
+      <div className="flex items-center gap-2 font-semibold"><AlertCircle className="size-4" />{t('configRenderError')}</div>
+      <button className="mt-2 underline underline-offset-2" onClick={() => window.location.reload()}>{t('reloadSettings')}</button>
+    </div>
   )
 }
 
@@ -139,8 +187,9 @@ function KbConfigSection({ kb }: { kb: string }) {
   const [busy, setBusy] = useState(false)
 
   const apply = useCallback((c: KbConfig) => {
-    setConfig(c)
-    setApiBase(c.openai_api_base ?? '')
+    const normalized = normalizeConfig(c)
+    setConfig(normalized)
+    setApiBase(normalized.openai_api_base ?? '')
     setApiKeyInput('')
   }, [])
 
@@ -238,6 +287,7 @@ function KbConfigSection({ kb }: { kb: string }) {
       <h3 className="text-[12px] font-semibold text-muted-foreground tracking-wide">{t('kbSettings:configHeading')}</h3>
 
       <OverrideRow
+        key={`model-${config.sources.model}-${config.model}`}
         label={t('common:fields.model')}
         field="model"
         source={config.sources.model}
@@ -248,6 +298,7 @@ function KbConfigSection({ kb }: { kb: string }) {
         onRevert={() => setOverride('model', null)}
       />
       <OverrideRow
+        key={`language-${config.sources.language}-${config.language}`}
         label={t('common:fields.wikiLanguage')}
         field="language"
         source={config.sources.language}
@@ -258,6 +309,7 @@ function KbConfigSection({ kb }: { kb: string }) {
         onRevert={() => setOverride('language', null)}
       />
       <OverrideRow
+        key={`threshold-${config.sources.pageindex_threshold}-${config.pageindex_threshold}`}
         label={t('common:fields.threshold')}
         field="pageindex_threshold"
         source={config.sources.pageindex_threshold}
@@ -349,7 +401,6 @@ function OverrideRow({
   const { t } = useTranslation(['kbSettings', 'common'])
   const overridden = source === 'kb'
   const [draft, setDraft] = useState(effective)
-  useEffect(() => setDraft(effective), [effective])
 
   const inheritedBadge =
     source === 'global'

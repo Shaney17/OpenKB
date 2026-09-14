@@ -85,6 +85,7 @@ async def test_run_skill_raises_skill_not_found_with_available_list(tmp_path: Pa
             intent="anything",
             kb_dir=kb_dir,
             model="openai/gpt-4o",
+            extra_skill_roots=(str(kb_dir / "skills"),),
         )
     msg = str(exc_info.value)
     # Helpful: lists what IS available so the user can see the typo
@@ -96,13 +97,24 @@ async def test_run_skill_raises_skill_not_found_with_available_list(tmp_path: Pa
 @pytest.mark.asyncio
 async def test_run_skill_loads_body_into_instructions(tmp_path: Path):
     kb_dir = _make_kb(tmp_path)
-    _install_skill(kb_dir, "marker-skill", body="UNIQUE-BODY-MARKER")
+    skill_dir = _install_skill(kb_dir, "marker-skill", body="UNIQUE-BODY-MARKER")
+    (skill_dir / "references").mkdir()
+    (skill_dir / "references" / "guide.md").write_text("GUIDE BODY", encoding="utf-8")
 
     captured: dict = {}
 
     async def fake_runner_run(agent, seed, **kw):
+        import json
+
+        from agents.tool_context import ToolContext
+
         captured["instructions"] = agent.instructions
         captured["tools"] = [getattr(t, "name", "?") for t in agent.tools]
+        reader = next(t for t in agent.tools if t.name == "read_skill_file")
+        ctx = ToolContext(context=None, tool_name="t", tool_call_id="c", tool_arguments="{}")
+        captured["guide"] = await reader.on_invoke_tool(
+            ctx, json.dumps({"name": "marker-skill", "path": "references/guide.md"})
+        )
         return MagicMock()
 
     with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
@@ -111,15 +123,18 @@ async def test_run_skill_loads_body_into_instructions(tmp_path: Path):
             intent="DO-THE-INTENT",
             kb_dir=kb_dir,
             model="openai/gpt-4o",
+            extra_skill_roots=(str(kb_dir / "skills"),),
         )
 
     # Body and intent are both present in the constructed agent's instructions.
     assert "UNIQUE-BODY-MARKER" in captured["instructions"]
     assert "DO-THE-INTENT" in captured["instructions"]
     assert "## User intent" in captured["instructions"]
-    # The skill-runner's two distinguishing tools are wired in.
+    # The runner also exposes the selected skill's supporting references.
     assert "write_file" in captured["tools"]
     assert "read_output_or_skill_file" in captured["tools"]
+    assert "read_skill_file" in captured["tools"]
+    assert captured["guide"] == "GUIDE BODY"
     # Return shape
     assert isinstance(result, SkillRunResult)
     assert result.skill_name == "marker-skill"
@@ -156,6 +171,7 @@ async def test_run_skill_templates_output_path_and_enforces_existence(tmp_path: 
             intent="brief",
             kb_dir=kb_dir,
             model="openai/gpt-4o",
+            extra_skill_roots=(str(kb_dir / "skills"),),
             slug="my-slug",
         )
 
@@ -193,6 +209,7 @@ async def test_run_skill_raises_if_templated_output_missing_post_run(tmp_path: P
                 kb_dir=kb_dir,
                 model="openai/gpt-4o",
                 slug="ghost",
+                extra_skill_roots=(str(kb_dir / "skills"),),
             )
 
 
@@ -232,6 +249,7 @@ async def test_run_skill_runs_deck_validator_when_mode_is_deck(tmp_path: Path):
             intent="x",
             kb_dir=kb_dir,
             model="openai/gpt-4o",
+            extra_skill_roots=(str(kb_dir / "skills"),),
             slug="demo",
         )
 
@@ -256,6 +274,7 @@ async def test_run_skill_no_validator_when_mode_not_deck(tmp_path: Path):
             intent="x",
             kb_dir=kb_dir,
             model="openai/gpt-4o",
+            extra_skill_roots=(str(kb_dir / "skills"),),
         )
 
     assert result.validation is None
@@ -278,6 +297,7 @@ async def test_run_skill_translates_max_turns_exceeded(tmp_path: Path):
                 kb_dir=kb_dir,
                 model="openai/gpt-4o",
                 max_turns=10,
+                extra_skill_roots=(str(kb_dir / "skills"),),
             )
     msg = str(exc_info.value)
     assert "10" in msg
@@ -303,6 +323,7 @@ async def test_run_skill_default_max_turns(tmp_path: Path):
             intent="x",
             kb_dir=kb_dir,
             model="openai/gpt-4o",
+            extra_skill_roots=(str(kb_dir / "skills"),),
         )
 
     assert captured["max_turns"] == MAX_TURNS

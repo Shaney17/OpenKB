@@ -201,3 +201,77 @@ async def test_substantive_streamed_text_is_not_duplicated_by_final(tmp_path, mo
     text_steps = [s for s in persisted_trace if s.get("kind") == "text"]
     assert len(text_steps) == 1
     assert text_steps[0]["text"] == "The real answer."
+
+
+@pytest.mark.asyncio
+async def test_failed_read_is_stamped_onto_the_persisted_trace(tmp_path, monkeypatch):
+    """A read that found nothing must survive restore as a FAILED step.
+
+    The live stream marks it from the `tool_result` event; without persisting
+    that outcome, reopening the session would show the same misleading
+    confirmed-read check the live view no longer shows.
+    """
+    session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
+
+    events = [
+        {"event": "tool_call", "data": {"name": "read_file", "arguments": '{"path": "a.md"}'}},
+        {
+            "event": "tool_result",
+            "data": {"name": "read_file", "arguments": '{"path": "a.md"}', "ok": True},
+        },
+        {"event": "tool_call", "data": {"name": "read_file", "arguments": '{"path": "b.md"}'}},
+        {
+            "event": "tool_result",
+            "data": {"name": "read_file", "arguments": '{"path": "b.md"}', "ok": False},
+        },
+        {"event": "final", "data": {"answer": "answer", "history": []}},
+    ]
+    monkeypatch.setattr(chat_mod, "iter_agent_response_events", _fake_event_stream(events))
+
+    collected = [event async for event in iter_chat_turn_events(object(), session, "q")]
+
+    # tool_result is forwarded to the client, not swallowed.
+    assert [e["event"] for e in collected].count("tool_result") == 2
+
+    tool_steps = [s for s in session.assistant_traces[-1] if s.get("kind") == "tool"]
+    assert [s["arguments"] for s in tool_steps] == ['{"path": "a.md"}', '{"path": "b.md"}']
+    # Only the failure is stamped; a successful read stays unmarked.
+    assert "ok" not in tool_steps[0]
+    assert tool_steps[1]["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_federated_space_reads_are_recorded_in_the_trace(tmp_path, monkeypatch):
+    """A project KB answers out of its child spaces, so those reads are the
+    turn's provenance and must render on restore like any other read."""
+    session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
+
+    events = [
+        {
+            "event": "tool_call",
+            "data": {"name": "search_spaces", "arguments": '{"query": "sổ lệnh"}'},
+        },
+        {
+            "event": "tool_call",
+            "data": {
+                "name": "read_space_page",
+                "arguments": '{"space": "PM", "path": "concepts/x.md"}',
+            },
+        },
+        {
+            "event": "tool_call",
+            "data": {
+                "name": "write_file",
+                "arguments": '{"path": "output/x.html", "content": "..."}',
+            },
+        },
+        {"event": "final", "data": {"answer": "answer", "history": []}},
+    ]
+    monkeypatch.setattr(chat_mod, "iter_agent_response_events", _fake_event_stream(events))
+
+    _ = [event async for event in iter_chat_turn_events(object(), session, "q")]
+
+    names = [s["name"] for s in session.assistant_traces[-1] if s.get("kind") == "tool"]
+    # write_file stays out: persisting its `content` would ship the whole
+    # generated file into the session JSON and over the restore wire.
+    assert names == ["search_spaces", "read_space_page"]

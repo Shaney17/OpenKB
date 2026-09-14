@@ -27,6 +27,14 @@ pageindex_threshold: 20          # PDF pages threshold for PageIndex
 #   - dataset
 #   - model
 
+# Optional: non-secret Confluence Cloud source settings. Keep the API token in
+# CONFLUENCE_API_TOKEN, never in this file.
+# sources:
+#   confluence:
+#     base_url: https://your-company.atlassian.net
+#     email: you@company.com
+#     # The CLI accepts `--space`; server projects manage space membership in the UI.
+
 # Optional: LLM / LiteLLM tuning. Keys are forwarded to LiteLLM; `timeout` and
 # `extra_headers` apply per request, the rest are set as litellm.<key>.
 # litellm:

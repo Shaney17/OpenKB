@@ -47,13 +47,6 @@
     "toggleTitle": "语言：{{label}}（点击切换）",
     "toggleAria": "语言：{{label}}"
   },
-  "auth": {
-    "title": "需要访问令牌",
-    "description": "此服务器已配置访问令牌（OPENKB_API_TOKEN）。请输入令牌以继续；令牌仅保存在本浏览器中。",
-    "tokenLabel": "访问令牌",
-    "baseLabel": "API 地址（可选，留空使用当前源）",
-    "connect": "连接"
-  },
   "connector": {
     "tooltip": "云端同步开发中 · 去 GitHub 投票表达需求",
     "vote": "想要它？去投票"

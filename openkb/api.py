@@ -20,6 +20,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -31,9 +32,11 @@ from openkb.agent.chat_session import delete_session, list_sessions, load_sessio
 from openkb.agent.query import build_run_config_from_bundle, run_query
 from openkb.api_config import apply_kb_config_patch, read_kb_config
 from openkb.api_config_router import config_router
+from openkb.api_confluence_router import confluence_router
 from openkb.api_documents_router import documents_router
 from openkb.api_graph import graph_router
 from openkb.api_helpers import (
+    UI_SESSION_COOKIE,
     _configure_cors,
     _init_kb_for_api,
     _iter_deck,
@@ -53,11 +56,13 @@ from openkb.api_helpers import (
     _stream_remove,
     _stream_skill,
     _stream_watch_events,
+    _ui_session_value,
     _write_add_uploads,
     require_bearer_token,
 )
 from openkb.api_kbs import _list_knowledge_bases
 from openkb.api_kbs_router import kbs_router
+from openkb.api_mcp_router import mcp_router
 from openkb.api_models import (
     AddResponse,
     ChatRequest,
@@ -96,13 +101,7 @@ from openkb.api_models import (
 )
 from openkb.api_output import output_router
 from openkb.api_pages_router import pages_router
-from openkb.cli import (
-    get_kb_list,
-    get_kb_status,
-    iter_recompile,
-    run_lint_report,
-    run_remove_for_api,
-)
+from openkb.cli import get_kb_status, iter_recompile, run_lint_report, run_remove_for_api
 from openkb.config import (
     DEFAULT_CONFIG,
     resolve_credential_bundle,
@@ -111,6 +110,7 @@ from openkb.config import (
     validate_kb_name,
 )
 from openkb.log import append_log
+from openkb.spaces import kb_inventory
 from openkb.watch_service import WatchRegistry
 
 logger = logging.getLogger(__name__)
@@ -169,6 +169,23 @@ def create_app() -> FastAPI:
     app.include_router(kbs_router)
     app.include_router(pages_router)
     app.include_router(documents_router)
+    app.include_router(confluence_router)
+    app.include_router(mcp_router)
+
+    @app.post("/api/v1/ui/session", status_code=status.HTTP_204_NO_CONTENT)
+    async def ui_session_endpoint(request: Request, response: Response) -> None:
+        """Bootstrap the same-origin web UI without exposing the API token."""
+        api_token = os.environ.get("OPENKB_API_TOKEN")
+        if api_token:
+            response.set_cookie(
+                UI_SESSION_COOKIE,
+                _ui_session_value(api_token),
+                httponly=True,
+                secure=request.url.scheme == "https",
+                samesite="strict",
+                max_age=24 * 60 * 60,
+                path="/",
+            )
 
     @app.get("/api/v1/kbs", response_model=KbListResponse)
     async def list_kbs_endpoint(
@@ -415,7 +432,9 @@ def create_app() -> FastAPI:
     ) -> ListResponse:
         kb_dir = _resolve_kb(request.kb)
         try:
-            return ListResponse(**get_kb_list(kb_dir))
+            # Federates a Confluence project across its child space KBs (its
+            # own wiki is empty by design); a plain KB is unchanged.
+            return ListResponse(**kb_inventory(kb_dir))
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

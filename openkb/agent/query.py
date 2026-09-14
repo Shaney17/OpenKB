@@ -10,12 +10,16 @@ from agents import Agent, Runner, ToolOutputImage, ToolOutputText, function_tool
 from openkb.agent.tools import (
     artifact_event_from_write,
     get_wiki_page_content,
+    is_tool_failure,
     read_wiki_file,
     read_wiki_image,
     write_kb_file,
 )
-from openkb.config import LlmCredentialBundle, resolve_model_settings
+from openkb.config import LlmCredentialBundle, normalize_litellm_model, resolve_model_settings
 from openkb.schema import get_agents_md
+from openkb.spaces import configured_spaces, is_project
+from openkb.spaces import read_space_page as read_space_page_in
+from openkb.spaces import search_spaces as search_spaces_in
 
 MAX_TURNS = 50
 
@@ -52,16 +56,55 @@ Before each tool call, output one short sentence explaining the reason.
 If you cannot find relevant information, say so clearly.
 """
 
+_SPACES_INSTRUCTIONS = """\
+
+## This KB is a project — its content lives in spaces
+
+This knowledge base is a *project container* synchronized from Confluence. Its
+own index.md, concepts/ and summaries/ are EMPTY BY DESIGN: every compiled page
+lives in a child space listed below. `read_file` cannot see those pages.
+
+Spaces in this project: {space_list}
+
+Override the search strategy above with this one:
+1. Call `search_spaces(query)` FIRST, before `read_file`. Search with the
+   user's own domain terms; retry with different terms before giving up.
+2. Call `read_space_page(space, path)` on the most promising matches to read
+   the full page — search returns short excerpts, never enough to answer from.
+   Follow a page's `[[wikilinks]]` by reading them with `read_space_page` in
+   the SAME space.
+3. Use `list_spaces()` when you need to know which spaces exist, or when a
+   search comes back empty across the board.
+4. Cite pages as `<SPACE>/<path>` so the user can find them again.
+
+Never tell the user this knowledge base is empty because index.md is empty —
+that file is empty in every project. Search the spaces first.
+"""
+
 
 def build_query_agent(
     wiki_root: str,
     model: str,
     language: str = "en",
     bundle: "LlmCredentialBundle | None" = None,
+    kb_dir: Path | None = None,
 ) -> Agent:
-    """Build and return the Q&A agent."""
+    """Build and return the Q&A agent.
+
+    When *kb_dir* is a Confluence project (it has child space KBs under
+    ``.openkb/spaces/``), the agent additionally gets the federated
+    ``list_spaces`` / ``search_spaces`` / ``read_space_page`` tools and
+    instructions that steer it to them. Without this the agent would read the
+    project's deliberately-empty ``index.md`` and report that the KB has no
+    content — the whole synchronized corpus sits one level down.
+    """
     schema_md = get_agents_md(Path(wiki_root))
     instructions = _QUERY_INSTRUCTIONS_TEMPLATE.format(schema_md=schema_md)
+    space_tools = _build_space_tools(kb_dir) if kb_dir is not None else []
+    if kb_dir is not None and space_tools:
+        instructions += _SPACES_INSTRUCTIONS.format(
+            space_list=", ".join(sorted(configured_spaces(kb_dir))) or "(none)"
+        )
     instructions += f"\n\nIMPORTANT: Answer in {language} language."
 
     @function_tool
@@ -114,13 +157,117 @@ def build_query_agent(
     else:
         model_settings = resolve_model_settings()
 
+    model = normalize_litellm_model(model, bundle.base_url if bundle is not None else None)
     return Agent(
         name="wiki-query",
         instructions=instructions,
-        tools=[read_file, get_page_content, get_image],
+        tools=[read_file, get_page_content, get_image, *space_tools],
         model=f"litellm/{model}",
         model_settings=ModelSettings(**model_settings),
     )
+
+
+def _build_space_tools(kb_dir: Path) -> list:
+    """Federated read tools for a Confluence project KB, or ``[]`` for a plain KB.
+
+    All three return plain strings (never raise): a tool that raises aborts the
+    run, whereas an in-band message lets the model correct a bad space name or
+    path on its next turn. Failure strings use the prefixes
+    ``openkb.agent.tools.is_tool_failure`` recognizes so the UI can render them
+    as failed steps rather than confirmed reads.
+    """
+    if not is_project(kb_dir):
+        return []
+    spaces = sorted(configured_spaces(kb_dir))
+
+    @function_tool
+    def list_spaces() -> str:
+        """List the Confluence spaces in this project and how much each holds.
+
+        Call this when you need to know which spaces exist before searching, or
+        when a search returned nothing anywhere.
+        """
+        return _format_space_list(kb_dir)
+
+    @function_tool
+    def search_spaces(query: str, spaces_filter: str = "", limit: int = 10) -> str:
+        """Search compiled wiki pages across this project's spaces.
+
+        This is the PRIMARY way to find content in a project KB. Returns ranked
+        matches as ``<SPACE> <path> (tier, score)`` plus a short excerpt; read
+        the promising ones in full with ``read_space_page``. ``compiled`` pages
+        (concepts/entities/summaries) come first and are the ones to read;
+        ``source`` pages are the raw ingested documents — large, so open one
+        only when a compiled page lacks the detail you need.
+
+        Args:
+            query: Search terms — use the user's own domain vocabulary.
+            spaces_filter: Optional comma-separated space keys to narrow the
+                search (e.g. ``"PM,ENG"``). Empty searches every space.
+            limit: Maximum number of matches to return (1-50).
+        """
+        selected = [part.strip() for part in spaces_filter.split(",") if part.strip()] or None
+        try:
+            matches = search_spaces_in(kb_dir, query, selected, max(1, min(limit, 50)))
+        except ValueError as exc:
+            return f"Unknown space: {exc}"
+        if not matches:
+            scope = spaces_filter or ", ".join(spaces)
+            return (
+                f"No matches for {query!r} in [{scope}]. "
+                "Try different or broader terms, or call list_spaces()."
+            )
+        lines = []
+        for hit in matches:
+            lines.append(f"{hit['space']} {hit['path']} ({hit['tier']}, score {hit['score']})")
+            lines.append(f"    {hit['excerpt']}")
+        return "\n".join(lines)
+
+    @function_tool
+    def read_space_page(space: str, path: str) -> str:
+        """Read one compiled wiki page in full from a project space.
+
+        Args:
+            space: Space key as shown by ``search_spaces`` / ``list_spaces``.
+            path: Page path within that space's wiki, as returned by
+                ``search_spaces`` (e.g. ``"concepts/order-execution.md"``).
+        """
+        try:
+            return read_space_page_in(kb_dir, space, path)
+        except ValueError as exc:
+            return f"Unknown space: {exc}"
+        except FileNotFoundError:
+            return f"File not found: {space}/{path}"
+        except OSError as exc:
+            return f"Could not read {space}/{path}: {exc}"
+
+    return [list_spaces, search_spaces, read_space_page]
+
+
+def _format_space_list(kb_dir: Path) -> str:
+    """Render the project's spaces with their sync status and compiled counts."""
+    from openkb.confluence_projects import public_project
+
+    try:
+        items = public_project(kb_dir)["spaces"]
+    except (ValueError, OSError) as exc:
+        return f"Could not read the project's spaces: {exc}"
+    if not items:
+        return "This project has no Confluence spaces."
+    lines = [f"{len(items)} space(s) in this project:"]
+    for item in items:
+        inventory = item.get("inventory") or {}
+        counts = ", ".join(
+            f"{len(inventory.get(kind) or [])} {kind}"
+            for kind in ("documents", "concepts", "entities")
+            if inventory.get(kind)
+        )
+        label = item.get("label") or item["key"]
+        lines.append(f"- {item['key']} — {label} [{item.get('status', 'idle')}]")
+        if counts:
+            lines.append(f"    {counts}")
+    lines.append("\nSearch them with search_spaces(query).")
+    return "\n".join(lines)
 
 
 def _resolve_tool_call_id(raw_item: Any) -> str | None:
@@ -152,9 +299,17 @@ async def iter_agent_response_events(
     The CLI renders these events to stdout; the REST API serializes the same
     events as SSE. Events: ``{"event": "delta", "data": {"text": ...}}`` for
     each response-text delta, ``{"event": "tool_call", "data": {...}}`` for
-    tool invocations, and a final ``{"event": "final", "data": {"answer": ...,
-    "history": [...]}}`` carrying the complete answer and reusable Agents SDK
-    history.
+    tool invocations, ``{"event": "tool_result", "data": {"name",
+    "arguments", "ok"}}`` when each one returns, and a final ``{"event":
+    "final", "data": {"answer": ..., "history": [...]}}`` carrying the complete
+    answer and reusable Agents SDK history.
+
+    ``tool_result.ok`` is False when the tool returned one of its in-band
+    failure strings (see ``openkb.agent.tools.is_tool_failure``). Read tools
+    report a missing path by RETURNING a message rather than raising, so the
+    SDK sees every call succeed; without this event a read that found nothing
+    is indistinguishable from one that delivered content, and the UI paints a
+    confirmed-read check on both.
     """
     from agents import RawResponsesStreamEvent, RunItemStreamEvent
     from openai.types.responses import ResponseTextDeltaEvent
@@ -190,9 +345,17 @@ async def iter_agent_response_events(
                 name, arguments = (
                     pending_calls.pop(call_id, ("", "")) if isinstance(call_id, str) else ("", "")
                 )
-                payload = artifact_event_from_write(
-                    name, arguments, str(getattr(item, "output", "") or "")
-                )
+                output = str(getattr(item, "output", "") or "")
+                if name:
+                    yield {
+                        "event": "tool_result",
+                        "data": {
+                            "name": name,
+                            "arguments": arguments,
+                            "ok": not is_tool_failure(output),
+                        },
+                    }
+                payload = artifact_event_from_write(name, arguments, output)
                 if payload is not None:
                     yield {"event": "artifact", "data": payload}
 
@@ -223,15 +386,16 @@ def build_chat_agent(
     natural-language follow-ups without giving the agent unrestricted write
     access to the wiki.
 
-    Skill discovery: ``openkb/agent/skills.scan_local_skills`` looks in
-    ``<kb>/skills/``, ``~/.openkb/skills/``, ``~/.claude/skills/`` for
-    ``SKILL.md`` files. Any found skill is exposed to the agent via
+    Skill discovery: ``openkb/agent/skills.scan_local_skills`` looks ONLY at
+    the skills bundled with OpenKB — it does not sweep the machine for skills
+    installed for other tools, which would let unrelated instructions steer a
+    KB's answers. Any found skill is exposed to the agent via
     ``ShellTool.environment.skills`` so the model can ``cat`` the skill body
     and follow its instructions when the user's request matches.
     """
     wiki_root = str(kb_dir / "wiki")
     kb_root = str(kb_dir)
-    base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    base = build_query_agent(wiki_root, model, language=language, bundle=bundle, kb_dir=kb_dir)
 
     @function_tool
     def write_file(path: str, content: str) -> str:
@@ -303,7 +467,29 @@ def build_chat_agent(
             _, body = _parse_frontmatter(text)
             return body
 
-        extra_tools.extend([list_skills, read_skill])
+        @function_tool
+        def read_skill_file(name: str, path: str) -> str:
+            """Read a supporting file from inside a skill's directory.
+
+            Skills are written progressive-disclosure style: ``SKILL.md`` is a
+            thin router that names deeper files (``references/**``,
+            playbooks, format specs) to load only when they apply. Use this to
+            open one once ``SKILL.md`` tells you to — ``read_file`` cannot,
+            it reads the wiki, not the skill.
+
+            Args:
+                name: skill name as listed by ``list_skills``.
+                path: file path relative to the skill directory
+                    (e.g. ``"references/lanes/02-process.md"``).
+            """
+            entry = skill_index.get(name)
+            if entry is None:
+                return f"Unknown skill: {name!r}. Call list_skills() to see available skills."
+            from openkb.agent.skills import read_skill_support_file
+
+            return read_skill_support_file(Path(entry["path"]), path)
+
+        extra_tools.extend([list_skills, read_skill, read_skill_file])
 
         # Build the prompt addendum listing skill names + descriptions
         # right inside the system prompt so the model sees them up front
@@ -322,7 +508,10 @@ def build_chat_agent(
             "description (e.g. 'make a deck', 'generate slides', 'draft a "
             "report'), you MUST call `read_skill(name)` to load that "
             "skill's full instructions and follow them strictly** — do not "
-            "freestyle the output format if a skill covers it.\n\n"
+            "freestyle the output format if a skill covers it. When a "
+            "skill's body points at one of its own supporting files, open it "
+            "with `read_skill_file(name, path)` — `read_file` reads the "
+            "wiki and will not find it.\n\n"
             + "\n".join(skill_lines)
             + "\n\nIf no listed skill matches the request, proceed with "
             "your default tools."
@@ -384,7 +573,7 @@ async def run_query(
 
     wiki_root = str(kb_dir / "wiki")
 
-    agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    agent = build_query_agent(wiki_root, model, language=language, bundle=bundle, kb_dir=kb_dir)
 
     if not stream:
         result = (
@@ -500,11 +689,10 @@ def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None
     with the per-KB `api_key` and `base_url` so concurrent requests on the
     shared event-loop thread never read each other's credentials.
 
-    The model is passed to `LitellmModel` *verbatim* (e.g. ``openai/gpt-4o``)
-    because `LitellmModel` feeds it straight to ``litellm.acompletion``. The
-    ``litellm/`` prefix is an Agent-layer convention to select the backend and
-    must NOT be added here -- doing so yields ``litellm/openai/...`` which
-    litellm rejects as an unknown provider.
+    The model passed to `LitellmModel` is a LiteLLM provider/model string. The
+    ``litellm/`` Agent-layer prefix must NOT be added here. For an explicitly
+    configured OpenAI-compatible base URL, an otherwise unqualified private
+    model name is normalized to ``openai/<model>``.
     """
     if bundle is None:
         return None
@@ -512,7 +700,7 @@ def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None
     from agents.extensions.models.litellm_model import LitellmModel
 
     litellm_model = LitellmModel(
-        model=model,
+        model=normalize_litellm_model(model, bundle.base_url),
         base_url=bundle.base_url,
         api_key=bundle.api_key,
     )

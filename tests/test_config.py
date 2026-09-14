@@ -357,6 +357,19 @@ def test_resolve_litellm_settings_drops_non_string_keys():
     }
 
 
+def test_openai_compatible_base_qualifies_unknown_model():
+    from openkb.config import normalize_litellm_model
+
+    assert (
+        normalize_litellm_model("mimo-v2.5", "https://token-plan-sgp.xiaomimimo.com/v1")
+        == "openai/mimo-v2.5"
+    )
+    assert normalize_litellm_model("anthropic/claude-sonnet", "https://proxy/v1") == (
+        "anthropic/claude-sonnet"
+    )
+    assert normalize_litellm_model("mimo-v2.5") == "mimo-v2.5"
+
+
 def test_resolve_litellm_settings_warns_on_non_mapping(caplog):
     with caplog.at_level(logging.WARNING, logger="openkb.config"):
         assert resolve_litellm_settings({"litellm": ["drop_params"]}) == {}
@@ -539,7 +552,7 @@ def test_query_agent_uses_global_language(_isolated_global, tmp_path, monkeypatc
 
     captured = {}
 
-    def _fake_build(wiki_root, model, *, language, bundle=None):
+    def _fake_build(wiki_root, model, *, language, bundle=None, kb_dir=None):
         captured["language"] = language
         raise RuntimeError("stop-after-build")  # short-circuit before any LLM call
 

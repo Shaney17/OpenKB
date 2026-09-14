@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
@@ -52,6 +53,7 @@ from openkb.log import append_log
 from openkb.watch_service import WatchRegistry
 
 security = HTTPBearer(auto_error=False)
+UI_SESSION_COOKIE = "openkb_ui_session"
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 MAX_UPLOAD_FILE_BYTES = int(os.environ.get("OPENKB_MAX_UPLOAD_FILE_BYTES", str(100 * 1024 * 1024)))
 MAX_UPLOAD_REQUEST_BYTES = int(
@@ -100,7 +102,12 @@ def _mount_web_ui(app: FastAPI) -> None:
         app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web-ui")
 
 
-def require_bearer_token(
+def _ui_session_value(api_token: str) -> str:
+    """Derive a browser-session value without exposing the API token."""
+    return hmac.new(api_token.encode("utf-8"), b"openkb-web-ui", hashlib.sha256).hexdigest()
+
+
+def require_bearer_only(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> None:
     expected = os.environ.get("OPENKB_API_TOKEN")
@@ -121,6 +128,20 @@ def require_bearer_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid bearer token.",
         )
+
+
+def require_bearer_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> None:
+    """Authorize REST calls by external Bearer token or same-origin UI session."""
+    expected = os.environ.get("OPENKB_API_TOKEN")
+    if not expected:
+        return
+    cookie = request.cookies.get(UI_SESSION_COOKIE)
+    if cookie and hmac.compare_digest(cookie, _ui_session_value(expected)):
+        return
+    require_bearer_only(credentials)
 
 
 def _resolve_kb(value: str) -> Path:
@@ -424,7 +445,9 @@ async def _stream_query(
     try:
         config = resolve_effective_config(kb_dir)[0]
         language = config.get("language", "en")
-        agent = build_query_agent(str(kb_dir / "wiki"), model, language=language, bundle=bundle)
+        agent = build_query_agent(
+            str(kb_dir / "wiki"), model, language=language, bundle=bundle, kb_dir=kb_dir
+        )
         final_answer = ""
         async for event in iter_agent_response_events(
             agent, request.question, run_config=run_config

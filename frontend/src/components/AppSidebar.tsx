@@ -74,7 +74,7 @@ export default function AppSidebar() {
   }, [])
 
   return (
-    <aside className="glass m-2 mr-0 w-[236px] shrink-0 flex flex-col rounded-apple-lg px-3 pb-3 pt-2">
+    <aside className="glass m-2 mr-0 hidden w-[236px] shrink-0 flex-col rounded-apple-lg px-3 pb-3 pt-2 md:flex">
       {/* 品牌 */}
       <div className="flex items-center gap-2 px-2 h-10 mb-1">
         <div className="w-6 h-6 rounded-apple-sm bg-accent-brand text-white grid place-items-center text-[13px] font-extrabold tracking-tighter">

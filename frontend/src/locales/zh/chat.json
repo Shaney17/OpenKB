@@ -9,7 +9,9 @@
   "sources": {
     "heading": "参考来源",
     "pageTip": "点击查看该 wiki 页面",
-    "internalTip": "长文档内部内容（PageIndex），无独立页面可打开"
+    "internalTip": "长文档内部内容（PageIndex），无独立页面可打开",
+    "searchTip": "在该项目的 Confluence 空间中做关键词检索",
+    "failedTip": "该次读取没有返回内容——此知识库中不存在该路径"
   },
   "reading": {
     "page": "正在查阅 <0>{{label}}</0>",
@@ -17,7 +19,9 @@
     "thinking": "正在思考…"
   },
   "step": {
-    "read": "读取 <0>{{path}}</0>"
+    "read": "读取 <0>{{path}}</0>",
+    "searched": "在空间中检索 <0>{{path}}</0>",
+    "readFailed": "无法读取 <0>{{path}}</0>"
   },
   "requestError": "请求失败：{{error}}",
   "savedTo": "已保存到 {{path}}",

@@ -1,6 +1,8 @@
 {
   "title": "Knowledge base settings",
   "configHeading": "Config",
+  "configRenderError": "Project settings could not be displayed.",
+  "reloadSettings": "Reload settings",
   "credHeading": "Credentials (this KB's .env)",
   "maintHeading": "Maintenance",
   "credSaved": "Credentials saved",

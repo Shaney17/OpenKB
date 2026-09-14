@@ -20,13 +20,18 @@ import i18n from "@/lib/i18n"
  *    pages.
  */
 export interface Source {
-  kind: "page" | "doc"
-  /** Display label: the page path (kind `"page"`) or doc name (kind `"doc"`). */
+  kind: "page" | "doc" | "search"
+  /** Display label: the page path (kind `"page"`), doc name (kind `"doc"`), or
+   *  the query text (kind `"search"`). */
   label: string
   /** Wiki-relative page path — present only for kind `"page"`. */
   path?: string
   /** Long-document name — present only for kind `"doc"`. */
   docName?: string
+  /** Confluence space key — present when the read came from a project KB's
+   *  child space (`read_space_page`), so the page opens against that space
+   *  rather than the project's own empty wiki. */
+  space?: string
 }
 
 /**
@@ -38,10 +43,14 @@ export interface Source {
  *  - `tool`: one whitelisted read (`toolCallSource`). `done` flips true once a
  *    LATER tool call arrives (the previous read must have completed) or the
  *    turn settles (`final`/`done`), driving the ✅-when-resolved affordance.
+ *    `ok` is false when the backend's `tool_result` reported the read failed
+ *    (missing path, unknown space); `done && ok !== false` is the only state
+ *    that earns a ✅. Undefined means "no result seen" — an older persisted
+ *    trace, or a stream that ended before the result arrived.
  */
 export type TurnStep =
   | { kind: "text"; text: string }
-  | { kind: "tool"; source: Source; done: boolean }
+  | { kind: "tool"; source: Source; done: boolean; ok?: boolean }
 
 /**
  * Accumulated state for ONE assistant turn, folded from the SSE event stream.
@@ -107,20 +116,30 @@ function normalizePath(path: string): string {
     .replace(/\.md$/i, "")
 }
 
+/** Index of the LAST element satisfying `pred`, or -1. (Array.prototype.findLastIndex
+ *  needs a newer lib target than this project's tsconfig sets.) */
+function findLastIndex<T>(items: T[], pred: (item: T) => boolean): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (pred(items[i])) return i
+  }
+  return -1
+}
+
 function sourceKey(s: Source): string {
-  return s.kind === "page"
-    ? `page:${normalizePath(s.path ?? "")}`
-    : `doc:${(s.docName ?? "").trim()}`
+  if (s.kind === "page") return `page:${s.space ?? ""}:${normalizePath(s.path ?? "")}`
+  if (s.kind === "search") return `search:${s.label.trim().toLowerCase()}`
+  return `doc:${(s.docName ?? "").trim()}`
 }
 
 /**
  * The WHITELIST. Turn a `tool_call` event's `data` into a {@link Source}, or
  * `null` to drop it.
  *
- * Only `read_file` and `get_page_content` are recognised; any other tool name
- * (`get_image`, or a tool added to the agent later) yields `null` and is
- * ignored. This is deliberately a whitelist, not a blacklist: an unknown future
- * tool never becomes a broken or misleading chip.
+ * Only `read_file`, `get_page_content`, `read_space_page` and `search_spaces`
+ * are recognised; any other tool name (`get_image`, `list_spaces`, or a tool
+ * added to the agent later) yields `null` and is ignored. This is deliberately
+ * a whitelist, not a blacklist: an unknown future tool never becomes a broken
+ * or misleading chip.
  *
  * `arguments` is a JSON string — parsed defensively; a parse failure or a
  * missing required field yields `null` rather than a half-formed source.
@@ -128,7 +147,14 @@ function sourceKey(s: Source): string {
 export function toolCallSource(data: unknown): Source | null {
   const d = (data ?? {}) as { name?: unknown; arguments?: unknown }
   const name = d.name
-  if (name !== "read_file" && name !== "get_page_content") return null
+  if (
+    name !== "read_file" &&
+    name !== "get_page_content" &&
+    name !== "read_space_page" &&
+    name !== "search_spaces"
+  ) {
+    return null
+  }
 
   let args: Record<string, unknown> = {}
   const raw = d.arguments
@@ -146,6 +172,19 @@ export function toolCallSource(data: unknown): Source | null {
     const path = typeof args.path === "string" ? args.path.trim() : ""
     if (!path) return null
     return { kind: "page", label: path, path }
+  }
+  if (name === "read_space_page") {
+    const path = typeof args.path === "string" ? args.path.trim() : ""
+    const space = typeof args.space === "string" ? args.space.trim() : ""
+    if (!path || !space) return null
+    // Label carries the space so provenance reads unambiguously across a
+    // project whose spaces can hold same-named pages.
+    return { kind: "page", label: `${space}/${path}`, path, space }
+  }
+  if (name === "search_spaces") {
+    const query = typeof args.query === "string" ? args.query.trim() : ""
+    if (!query) return null
+    return { kind: "search", label: query }
   }
   // get_page_content
   const docName = typeof args.doc_name === "string" ? args.doc_name.trim() : ""
@@ -190,7 +229,10 @@ export function stepsFromTrace(trace: PersistedTraceStep[]): TurnStep[] {
       if (typeof s.text === "string" && s.text) out.push({ kind: "text", text: s.text })
     } else if (s.kind === "tool") {
       const src = toolCallSource({ name: s.name, arguments: s.arguments })
-      if (src) out.push({ kind: "tool", source: src, done: true })
+      // `ok` is persisted only for reads that FAILED (see iter_chat_turn_events);
+      // its absence on an older trace means "outcome unknown", which renders the
+      // same as a plain settled read.
+      if (src) out.push({ kind: "tool", source: src, done: true, ...(s.ok === false ? { ok: false } : {}) })
     }
   }
   return out
@@ -236,7 +278,11 @@ export function sourcesFromHistory(history: unknown): Source[] | null {
  *
  * Real backend event shapes (verified against `openkb/api_helpers.py`):
  *   - `delta`     → `{ text }`            (incremental answer text)
- *   - `tool_call` → `{ name, arguments }` (arguments is a JSON string)
+ *   - `tool_call`   → `{ name, arguments }` (arguments is a JSON string)
+ *   - `tool_result` → `{ name, arguments, ok }` — the call's honest outcome.
+ *                     Read tools return their failures as text rather than
+ *                     raising, so `tool_call` alone never meant the read
+ *                     succeeded; this is what settles that.
  *   - `final`     → query: `{ answer, saved_path }`;
  *                   chat:  `{ answer, session_id, turn_count }`
  *   - `error`     → `{ message }`
@@ -262,7 +308,32 @@ export function foldSseEvent(state: ChatTurnState, event: SseEvent, kb: string):
         ...markToolStepsDone(state.steps),
         { kind: "tool", source: src, done: false },
       ]
-      return { ...state, reading: src, sources: mergeSource(state.sources, src), steps }
+      // A search is a step, not provenance: it names what was looked for, not
+      // a wiki artifact the answer drew on. Only the pages actually read
+      // belong in `sources`.
+      const sources = src.kind === "search" ? state.sources : mergeSource(state.sources, src)
+      return { ...state, reading: src, sources, steps }
+    }
+    case "tool_result": {
+      // The honest outcome of the most recent matching call. Successes need no
+      // patch (a settled step with `ok` undefined already renders as done), so
+      // only a failure is folded in — that's what the ✅ was lying about.
+      if (data.ok !== false) return state
+      const name = typeof data.name === "string" ? data.name : ""
+      const src = toolCallSource({ name, arguments: data.arguments })
+      if (!src) return state
+      const key = sourceKey(src)
+      const idx = findLastIndex(
+        state.steps,
+        (s) => s.kind === "tool" && sourceKey(s.source) === key,
+      )
+      if (idx < 0) return state
+      const target = state.steps[idx] as Extract<TurnStep, { kind: "tool" }>
+      const steps = [...state.steps]
+      steps[idx] = { ...target, done: true, ok: false }
+      // A failed read is not provenance — drop it from `sources` so the answer
+      // never cites a page the agent could not actually open.
+      return { ...state, steps, sources: state.sources.filter((s) => sourceKey(s) !== key) }
     }
     case "final": {
       const histSources = sourcesFromHistory(data.history)
@@ -393,6 +464,9 @@ export interface PersistedTraceStep {
   text?: string
   name?: string
   arguments?: string
+  /** Present (and `false`) only on a tool step whose read FAILED. Absent on a
+   *  successful read and on any trace persisted before this field existed. */
+  ok?: boolean
 }
 
 export interface ChatSessionLoad {

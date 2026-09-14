@@ -289,6 +289,56 @@ The LLM reads `AGENTS.md` from disk at runtime, so your edits take effect immedi
 
 # 🔌 Integrations
 
+### Confluence Cloud sync (API token)
+
+OpenKB can synchronize one or more Confluence Cloud spaces through REST API v2.
+Use an Atlassian account email + API token; the token is read from the
+environment and is never written to the KB:
+
+```bash
+export CONFLUENCE_API_TOKEN="your-atlassian-api-token"
+
+openkb sync confluence \
+  --base-url https://your-company.atlassian.net \
+  --email you@company.com \
+  --space ENG \
+  --space SRE
+```
+
+The first run compiles each page through the normal OpenKB add pipeline. Later
+runs skip unchanged pages and replace changed versions. Remote deletions are
+non-destructive by default; opt in after previewing:
+
+```bash
+openkb sync confluence --dry-run --delete-missing
+openkb sync confluence --delete-missing
+```
+
+To avoid repeating non-secret settings, put them in `.openkb/config.yaml`:
+
+```yaml
+sources:
+  confluence:
+    base_url: https://your-company.atlassian.net
+    email: you@company.com
+    spaces: [ENG, SRE]
+```
+
+Then `openkb sync confluence` only needs `CONFLUENCE_API_TOKEN` in the shell or
+the KB-local `.env`. Sync state and normalized Markdown are kept under
+`.openkb/`; use separate KBs for Confluence spaces with different access
+boundaries because compiled concept pages synthesize information across sources.
+
+For a server deployment, open a project in OpenKB Studio and choose
+**Confluence spaces**. Configure the single shared site, account, and token in
+the project `.env` as `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, and
+`CONFLUENCE_API_TOKEN`. Admins then add spaces using only their Confluence space
+ID, sync one space or all project spaces, and inspect each space's concepts,
+entities, summaries, sources, failed pages, and latest sync status. The
+membership list is stored by the server under the project — it does not need to
+be maintained in `.env`. Every space is compiled into an isolated child KB,
+while the project groups the spaces agents are allowed to search.
+
 ### Using with Obsidian
 
 The wiki is a directory of Markdown files with `[[wikilinks]]`. Obsidian renders it natively.
@@ -298,9 +348,25 @@ The wiki is a directory of Markdown files with `[[wikilinks]]`. Obsidian renders
 3. Use graph view to see knowledge connections
 4. Use Obsidian Web Clipper to add web articles to `raw/`
 
-### Using with Claude Code / Codex / Gemini CLI
+### Using with Claude Code / Kiro / Codex
 
-OpenKB ships a `SKILL.md` so any agent can read your compiled wiki. No extra runtime, no MCP setup, just install the skill once.
+For server deployments, connect the client to OpenKB's Streamable HTTP MCP
+endpoint at `https://your-openkb-host/mcp` and send the server's
+`OPENKB_API_TOKEN` as a Bearer token. Install the single
+[`skills/openkb/SKILL.md`](skills/openkb/SKILL.md) in the client. The skill
+routes every request through MCP with an explicit project and can search one or
+many spaces; there is no skill per space and the client does not need filesystem
+access to the server.
+
+The server exposes `openkb_list_projects`, `openkb_list_spaces`, `openkb_search`,
+`openkb_get_inventory`, and `openkb_read_page`. Since these return normal MCP
+tool results rather than OpenKB's CLI token stream, the earlier duplicated
+stream rendering issue does not apply to this integration.
+
+The bundled web UI never asks for or stores `OPENKB_API_TOKEN`. It obtains a
+same-origin HttpOnly UI session from the server, which reads the token from its
+`.env`. External REST and MCP clients still authenticate with
+`Authorization: Bearer <OPENKB_API_TOKEN>`.
 
 <details>
 <summary><i>Claude Code:</i></summary>

@@ -166,7 +166,7 @@ async def test_run_deck_create_raises_when_skill_missing(tmp_path: Path):
         raise SkillNotFoundError("not installed")
 
     with patch("openkb.deck.creator.run_skill", new=AsyncMock(side_effect=missing_skill)):
-        with pytest.raises(RuntimeError, match="not installed"):
+        with pytest.raises(RuntimeError, match="not bundled with OpenKB"):
             await run_deck_create(
                 kb_dir=kb_dir,
                 deck_name="test-deck",

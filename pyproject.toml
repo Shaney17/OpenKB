@@ -94,13 +94,14 @@ artifacts = ["openkb/web/**"]
 [tool.hatch.build.targets.wheel]
 packages = ["openkb"]
 
-# Bundle the built-in deck themes + html critic into the wheel so
-# `openkb deck new` / `--critique` / chat `/deck` work right after
+# Bundle the built-in skills into the wheel so
+# `openkb deck new` / `--critique` / chat answers work right after
 # `pip install` (scan_local_skills also looks under openkb/_skills/).
 [tool.hatch.build.targets.wheel.force-include]
 "skills/openkb-deck-neon" = "openkb/_skills/openkb-deck-neon"
 "skills/openkb-deck-editorial" = "openkb/_skills/openkb-deck-editorial"
 "skills/openkb-html-critic" = "openkb/_skills/openkb-html-critic"
+"skills/ask-pm" = "openkb/_skills/ask-pm"
 
 [tool.ruff]
 target-version = "py310"

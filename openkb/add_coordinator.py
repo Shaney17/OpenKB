@@ -88,7 +88,12 @@ def _failure_target(details: dict) -> str:
     return ""
 
 
-def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
+def run_add_mutation(
+    kb_dir: Path,
+    plan: AddMutationPlan,
+    *,
+    on_error: Callable[[Exception], None] | None = None,
+) -> bool:
     if not kb_ingest_lock_held(kb_dir / ".openkb"):
         raise RuntimeError("run_add_mutation requires the caller to hold kb_ingest_lock")
     snapshot = None
@@ -111,6 +116,8 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
             raise DirtyRollbackError(plan.operation, dirty_journal)
         click.echo(f"  [ERROR] {plan.operation} failed{_failure_target(plan.details)}: {exc}")
         logger.debug("%s mutation failed:", plan.operation, exc_info=True)
+        if on_error is not None:
+            on_error(exc)
         return False
     except BaseException:
         # Interrupt (KeyboardInterrupt / SystemExit): best-effort rollback for

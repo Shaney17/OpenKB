@@ -410,6 +410,21 @@ class LlmCredentialBundle:
     parallel_tool_calls_explicit: bool = False
 
 
+def normalize_litellm_model(model: str, base_url: str | None = None) -> str:
+    """Add the OpenAI provider for unqualified models on compatible gateways.
+
+    LiteLLM can infer providers for well-known names such as ``gpt-5.4``, but
+    private/OpenAI-compatible model names (for example Xiaomi ``mimo-v2.5``)
+    require ``openai/<model>``. ``OPENAI_API_BASE`` is the explicit signal that
+    the endpoint speaks the OpenAI protocol. Already-qualified provider/model
+    strings are preserved verbatim.
+    """
+    cleaned = model.strip()
+    if cleaned and "/" not in cleaned and isinstance(base_url, str) and base_url.strip():
+        return f"openai/{cleaned}"
+    return cleaned
+
+
 def resolve_credential_bundle(kb_dir: Path) -> LlmCredentialBundle:
     """Build an :class:`LlmCredentialBundle` from a KB's config, purely.
 

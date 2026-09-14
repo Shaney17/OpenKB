@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router"
 import { useTranslation, Trans } from "react-i18next"
 import type { TFunction } from "i18next"
-import { ArrowLeft, FileText, FolderInput, Loader2, Sparkles, BookText, CheckCircle2, CircleStop } from "lucide-react"
+import { AlertCircle, ArrowLeft, FileText, FolderInput, Loader2, Search, Sparkles, BookText, CheckCircle2, CircleStop } from "lucide-react"
 import { toast } from "sonner"
 import ChatInput, { slashCommands, type SlashCommand } from "@/components/ChatInput"
 import MarkdownView from "@/components/MarkdownView"
@@ -112,30 +112,54 @@ const CLOSED_PANEL: PanelState = { open: false, path: "", content: null, error: 
  * exactly like the old source chip); a `doc` read is a non-clickable label
  * (its PageIndex-internal content has no standalone page to open).
  */
-function ToolStep({ source, done, onOpen }: { source: Source; done: boolean; onOpen: (s: Source) => void }) {
+function ToolStep({
+  source,
+  done,
+  ok,
+  onOpen,
+}: {
+  source: Source
+  done: boolean
+  ok?: boolean
+  onOpen: (s: Source) => void
+}) {
   const { t } = useTranslation("chat")
-  const TypeIcon = source.kind === "page" ? FileText : BookText
+  const failed = ok === false
+  const TypeIcon = source.kind === "page" ? FileText : source.kind === "search" ? Search : BookText
   const base =
-    "inline-flex items-center gap-2 max-w-full rounded-xl border border-[hsl(var(--glass-border))] glass-2 px-3 py-1.5 text-[12.5px] text-muted-foreground"
+    "inline-flex items-center gap-2 max-w-full rounded-xl border px-3 py-1.5 text-[12.5px] " +
+    (failed
+      ? "border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      : "border-[hsl(var(--glass-border))] glass-2 text-muted-foreground")
   const inner = (
     <>
-      {done ? (
-        <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
-      ) : (
+      {!done ? (
         <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-accent-brand" />
+      ) : failed ? (
+        <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+      ) : (
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
       )}
       <TypeIcon className="w-3 h-3 shrink-0 opacity-70" />
       <span className="min-w-0 break-all">
         <Trans
           t={t}
-          i18nKey="chat:step.read"
+          i18nKey={
+            source.kind === "search"
+              ? "chat:step.searched"
+              : failed
+                ? "chat:step.readFailed"
+                : "chat:step.read"
+          }
           values={{ path: source.label }}
           components={[<span className="font-mono2 text-foreground" />]}
         />
       </span>
     </>
   )
-  if (source.kind === "page") {
+  // A failed read has no page to open — rendering it clickable would only lead
+  // to the same 404 the agent already hit.
+  if (source.kind === "page" && !failed) {
     return (
       <button
         type="button"
@@ -148,7 +172,16 @@ function ToolStep({ source, done, onOpen }: { source: Source; done: boolean; onO
     )
   }
   return (
-    <div className={base} title={t("sources.internalTip")}>
+    <div
+      className={base}
+      title={
+        failed
+          ? t("sources.failedTip")
+          : source.kind === "search"
+            ? t("sources.searchTip")
+            : t("sources.internalTip")
+      }
+    >
       {inner}
     </div>
   )
@@ -196,7 +229,7 @@ function AssistantMessage({
               ) : null
             ) : (
               <div key={`step-${i}`}>
-                <ToolStep source={step.source} done={step.done} onOpen={onOpen} />
+                <ToolStep source={step.source} done={step.done} ok={step.ok} onOpen={onOpen} />
               </div>
             ),
           )}
@@ -611,7 +644,7 @@ export default function ChatSession() {
     if (s.kind !== "page" || !s.path) return
     setPanel({ open: true, path: s.path, content: null, error: null, loading: true })
     try {
-      const r = await getPage(kbRef.current, s.path)
+      const r = await getPage(kbRef.current, s.path, s.space)
       setPanel({ open: true, path: s.path, content: r.content, error: null, loading: false })
     } catch (e) {
       // A tool_call firing never guaranteed the read succeeded, and there is no

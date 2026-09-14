@@ -24,6 +24,7 @@ from openkb.api_models import (
     PageResponse,
 )
 from openkb.page_ops import delete_wiki_page, edit_wiki_page, page_link_context
+from openkb.spaces import is_project, project_index, resolve_page, space_dir
 
 pages_router = APIRouter()
 
@@ -34,8 +35,21 @@ async def page_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> PageResponse:
     kb_dir = _resolve_kb(request.kb)
+    path = request.path
+    if request.space:
+        # Explicit space (chat source chips): read that child KB directly.
+        try:
+            kb_dir = space_dir(kb_dir, request.space)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    elif is_project(kb_dir):
+        # A project's own wiki is empty, so its index is a generated roll-up
+        # and its page paths are space-qualified (`<type>/<SPACE>/<name>`).
+        if path in ("index", "index.md"):
+            return PageResponse(path=path, content=await run_in_threadpool(project_index, kb_dir))
+        kb_dir, path = resolve_page(kb_dir, path)
     wiki_dir = (kb_dir / "wiki").resolve()
-    rel = request.path if request.path.endswith(".md") else f"{request.path}.md"
+    rel = path if path.endswith(".md") else f"{path}.md"
     target = (wiki_dir / rel).resolve()
     if not target.is_relative_to(wiki_dir):
         raise HTTPException(status_code=400, detail="Invalid page path.")

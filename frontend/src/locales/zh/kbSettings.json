@@ -1,6 +1,8 @@
 {
   "title": "知识库设置",
   "configHeading": "配置",
+  "configRenderError": "无法显示项目设置。",
+  "reloadSettings": "重新加载设置",
   "credHeading": "凭证（本库 .env）",
   "maintHeading": "维护",
   "credSaved": "凭证已保存",

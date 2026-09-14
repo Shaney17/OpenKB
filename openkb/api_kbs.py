@@ -16,35 +16,45 @@ from typing import Any
 
 from openkb.api_helpers import _is_kb_dir
 from openkb.config import kb_root_dir, registered_kbs
+from openkb.spaces import configured_spaces, space_dir
 
 
 def _kb_list_item(kb_dir: Path, name: str) -> dict[str, Any]:
     """Build one KB-list item: name + resolved path + rollup counters.
 
     ``document_count`` comes from ``.openkb/hashes.json`` (0 if absent/corrupt)
-    and ``last_compile`` from the newest ``wiki/summaries/*.md`` mtime.
+    and ``last_compile`` from the newest ``wiki/summaries/*.md`` mtime. For a
+    Confluence project both are rolled up from its child space KBs, which is
+    where its content actually lives.
     """
-    hashes_file = kb_dir / ".openkb" / "hashes.json"
+    # A Confluence project keeps its documents in child space KBs, so its own
+    # hashes.json is empty and the switcher showed a fully-synced project as
+    # "0". Roll the children up instead.
+    roots = [space_dir(kb_dir, key) for key in sorted(configured_spaces(kb_dir))] or [kb_dir]
     doc_count = 0
-    if hashes_file.exists():
-        try:
-            doc_count = len(json.loads(hashes_file.read_text(encoding="utf-8")))
-        except (ValueError, OSError):
-            doc_count = 0
+    for root in roots:
+        hashes_file = root / ".openkb" / "hashes.json"
+        if hashes_file.exists():
+            try:
+                doc_count += len(json.loads(hashes_file.read_text(encoding="utf-8")))
+            except (ValueError, OSError):
+                continue
     last_compile = None
-    summaries_dir = kb_dir / "wiki" / "summaries"
-    if summaries_dir.is_dir():
+    mtimes: list[float] = []
+    for root in roots:
+        summaries_dir = root / "wiki" / "summaries"
+        if not summaries_dir.is_dir():
+            continue
         # Guard each stat() (like document_count above): a single unstattable
         # entry — e.g. a dangling symlink whose target was removed — must not
         # throw out of the whole /kbs listing and 500 every other KB.
-        mtimes: list[float] = []
         for p in summaries_dir.glob("*.md"):
             try:
                 mtimes.append(p.stat().st_mtime)
             except OSError:
                 continue
-        if mtimes:
-            last_compile = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(max(mtimes)))
+    if mtimes:
+        last_compile = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(max(mtimes)))
     return {
         "name": name,
         "path": str(kb_dir),

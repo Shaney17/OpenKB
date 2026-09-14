@@ -6,12 +6,21 @@ SDK expects for ``ShellTool.environment.skills``: a list of
 
 Skill search roots (first hit wins on name collision):
 
-  1. ``<kb>/skills/``         — project-local skills shipped with the KB
-  2. ``~/.openkb/skills/``    — user-global skills
-  3. ``~/.claude/skills/``    — Claude Code's skill dir (interop bonus)
-  4. bundled skills           — built-in deck themes / critic shipped with
-                               the package (lowest priority, so the roots
-                               above can override them)
+  1. ``extra_roots``   — roots a CALLER passes explicitly (see
+                         ``scan_local_skills``). Nothing is auto-discovered
+                         here; someone has to name the directory.
+  2. bundled skills    — the skills shipped with OpenKB itself
+                         (``BUNDLED_SKILL_ROOTS``), lowest priority so an
+                         explicit root can override a built-in.
+
+OpenKB scans NOTHING outside its own package by default. It used to also
+sweep ``<kb>/skills/``, ``~/.openkb/skills/`` and ``~/.claude/skills/``; that
+last one pulled every Claude Code skill on the machine into OpenKB's chat
+prompt, so a KB's answers could be steered by instructions that had nothing
+to do with OpenKB or with that knowledge base. The other two were
+manual-only conventions no code ever created. All three are gone: OpenKB's
+skill surface is now exactly what ships in the repo, plus whatever a caller
+names on purpose.
 
 Skill file layout::
 
@@ -36,11 +45,12 @@ from typing import Iterable, Tuple
 
 import yaml
 
-DEFAULT_SKILL_ROOTS: Tuple[str, ...] = (
-    "skills",  # relative to kb_dir
-    "~/.openkb/skills",
-    "~/.claude/skills",
-)
+#: Auto-scanned roots outside the package. Deliberately EMPTY: OpenKB must be
+#: independent of skills installed for other tools (notably ``~/.claude/skills``,
+#: whose contents were being injected into every OpenKB chat prompt). Kept as a
+#: named constant rather than deleted so the "what does OpenKB scan?" answer
+#: stays greppable, and so a future opt-in has an obvious home.
+DEFAULT_SKILL_ROOTS: Tuple[str, ...] = ()
 
 # Skills shipped with the package so the built-in deck themes + html critic
 # work out of the box (no manual install). Two candidates cover both install
@@ -74,6 +84,20 @@ def _parse_frontmatter(text: str) -> Tuple[dict, str]:
     return meta if isinstance(meta, dict) else {}, body
 
 
+def read_skill_support_file(skill_root: Path, path: str) -> str:
+    """Read one supporting file without escaping the selected skill directory."""
+    root = skill_root.resolve()
+    target = (root / path).resolve()
+    if not target.is_relative_to(root):
+        return "Access denied: path escapes the skill directory."
+    if not target.is_file():
+        return f"File not found: {path}"
+    try:
+        return target.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"Could not read {path}: {exc}"
+
+
 def scan_local_skills(
     kb_dir: Path,
     extra_roots: Iterable[str | Path] = (),
@@ -83,15 +107,21 @@ def scan_local_skills(
     Each entry is ``{"name": str, "description": str, "path": str}`` —
     the exact shape :class:`agents.ShellToolLocalSkill` expects.
 
+    Only the package's own ``BUNDLED_SKILL_ROOTS`` are scanned automatically.
+    A caller that genuinely wants another directory has to name it via
+    *extra_roots* — OpenKB never goes looking for skills installed for other
+    tools (see the module docstring).
+
     Args:
-        kb_dir: KB root. Used to resolve the relative ``skills/`` root.
-        extra_roots: Additional roots to scan, appended after defaults.
+        kb_dir: KB root. Only used to resolve a RELATIVE entry in
+            *extra_roots*; no root under it is scanned by default.
+        extra_roots: Additional roots to scan, ahead of the bundled ones.
 
     Returns:
         List of skill metadata dicts. Empty if no skills found.
     """
     seen: dict[str, dict[str, str]] = {}
-    # Bundled roots go last so KB/user/Claude skills override the built-ins.
+    # Bundled roots go last so an explicitly-passed root overrides a built-in.
     roots = list(DEFAULT_SKILL_ROOTS) + [str(r) for r in extra_roots] + list(BUNDLED_SKILL_ROOTS)
     for root_spec in roots:
         root = Path(root_spec).expanduser()

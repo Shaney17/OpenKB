@@ -1,21 +1,13 @@
 const LS_BASE = "openkb_api_base"
-const LS_TOKEN = "openkb_token"
 
 export function getApiBase(): string {
   return localStorage.getItem(LS_BASE) || ""
 }
-export function getToken(): string {
-  return localStorage.getItem(LS_TOKEN) || ""
-}
-export function setConnection(apiBase: string, token: string): void {
-  localStorage.setItem(LS_BASE, apiBase)
-  localStorage.setItem(LS_TOKEN, token)
-}
 
 /**
  * Warn ONCE if the configured API base is cross-origin AND served over plain
- * `http:` — the bearer token is attached to every request, so such a base would
- * send it in the clear. Advisory only (console; no UI) and never blocking:
+ * `http:` — the UI session cookie would be sent in the clear, so such a base is
+ * unsafe. Advisory only (console; no UI) and never blocking:
  * same-origin or a relative base (the production mount at `/`) is always safe
  * and never warns; a LAN/dev `http://` endpoint still works, just with a
  * heads-up. The flag flips only once we actually warn, so a base later switched
@@ -32,7 +24,7 @@ function checkBaseSafety(): void {
       baseSafetyWarned = true
       console.warn(
         `[OpenKB] API base "${base}" is cross-origin and served over http:. ` +
-          "Your API token is sent to this host in the clear on every request. " +
+          "Your UI session is sent to this host without transport encryption. " +
           "Use https for a remote API, or verify this URL is trusted.",
       )
     }
@@ -48,9 +40,21 @@ function baseUrl(): string {
   return getApiBase().replace(/\/$/, "")
 }
 
-let unauthorizedHandler: (() => void) | null = null
-export function onUnauthorized(cb: () => void): void {
-  unauthorizedHandler = cb
+let uiSession: Promise<void> | null = null
+
+/** Ask the server for an HttpOnly UI session. The API token never enters JS. */
+export function ensureUiSession(): Promise<void> {
+  if (!uiSession) {
+    // One-time cleanup for browsers that used the retired token-entry dialog.
+    localStorage.removeItem("openkb_token")
+    uiSession = fetch(baseUrl() + "/api/v1/ui/session", {
+      method: "POST",
+      credentials: "include",
+    }).then((response) => {
+      if (!response.ok) throw new ApiError(response.status, "Could not start UI session")
+    })
+  }
+  return uiSession
 }
 
 export class ApiError extends Error {
@@ -74,18 +78,17 @@ interface FetchOpts {
 
 /** JSON request/response helper. Attaches the bearer token when present. */
 export async function apiFetch<T>(path: string, opts: FetchOpts = {}): Promise<T> {
-  const token = getToken()
+  await ensureUiSession()
   const headers: Record<string, string> = {}
   if (opts.body !== undefined) headers["Content-Type"] = "application/json"
-  if (token) headers["Authorization"] = `Bearer ${token}`
 
   const res = await fetch(baseUrl() + path, {
     method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
     headers,
+    credentials: "include",
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   })
 
-  if (res.status === 401) unauthorizedHandler?.()
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`
     let structured: unknown
@@ -124,11 +127,8 @@ export async function apiFetch<T>(path: string, opts: FetchOpts = {}): Promise<T
  * appear in a query string.
  */
 export async function fetchAsBlobUrl(path: string): Promise<string> {
-  const token = getToken()
-  const headers: Record<string, string> = {}
-  if (token) headers["Authorization"] = `Bearer ${token}`
-  const res = await fetch(baseUrl() + path, { headers })
-  if (res.status === 401) unauthorizedHandler?.()
+  await ensureUiSession()
+  const res = await fetch(baseUrl() + path, { credentials: "include" })
   if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`)
   const blob = await res.blob()
   return URL.createObjectURL(blob)
@@ -153,17 +153,16 @@ export async function* apiStream(
   body: unknown,
   signal?: AbortSignal,
 ): AsyncGenerator<SseEvent> {
-  const token = getToken()
+  await ensureUiSession()
   const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (token) headers["Authorization"] = `Bearer ${token}`
 
   const res = await fetch(baseUrl() + path, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
     signal,
+    credentials: "include",
   })
-  if (res.status === 401) unauthorizedHandler?.()
   if (!res.ok || !res.body) {
     throw new ApiError(res.status, `${res.status} ${res.statusText}`)
   }

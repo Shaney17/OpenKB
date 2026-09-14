@@ -1,5 +1,6 @@
 {
   "settingsButton": "知识库设置",
+  "confluenceSpaces": "Confluence 空间",
   "loadError": "加载失败：{{error}}",
   "wikiNote": "wiki/ 是本机的纯 Markdown 目录，数据始终归你",
   "reader": {

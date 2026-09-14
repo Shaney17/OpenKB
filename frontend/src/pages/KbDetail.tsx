@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import * as Dialog from '@radix-ui/react-dialog'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { FileText, Link2, Loader2, Pencil, Upload, RefreshCw, Settings2, Trash2, Circle, CheckCircle2, CircleSlash2, XCircle, X, BookOpen } from 'lucide-react'
+import { FileText, Link2, Loader2, Pencil, Upload, RefreshCw, Settings2, Trash2, Circle, CheckCircle2, CircleSlash2, XCircle, X, BookOpen, Layers3 } from 'lucide-react'
 import { toast } from 'sonner'
 import { deletePage, editPage, getDocumentSource, getKbInventory, getPage, getPageLinks, type DocumentSource, type KbInventory, type WikiDocument } from '@/api/wiki'
 import { streamUpload, removeDocument, type AddResult } from '@/api/maintenance'
@@ -410,10 +410,17 @@ export default function KbDetail() {
           <span className="w-3 h-3 rounded-full bg-accent-brand" />
           <h1 className="text-[19px] font-extrabold tracking-tight text-foreground">{id}</h1>
           <button
+            onClick={() => navigate(`/kb/${encodeURIComponent(id)}/confluence`)}
+            className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Layers3 className="w-4 h-4" />
+            {t('kb:confluenceSpaces')}
+          </button>
+          <button
             onClick={() => setSettingsOpen(true)}
             title={t('kb:settingsButton')}
             aria-label={t('kb:settingsButton')}
-            className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <Settings2 className="w-4 h-4" />
           </button>

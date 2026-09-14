@@ -77,7 +77,7 @@ _SIGINT_EXIT_WINDOW = 2.0
 # the only tool reads the UI renders, and limiting the trace to them keeps a
 # non-read tool's large arguments (e.g. write_file's full file `content`) out
 # of the session JSON and off the restore wire.
-_TRACE_READ_TOOLS = frozenset({"read_file", "get_page_content"})
+_TRACE_READ_TOOLS = frozenset({"read_file", "get_page_content", "read_space_page", "search_spaces"})
 
 
 def _use_color(force_off: bool) -> bool:
@@ -972,6 +972,19 @@ async def iter_chat_turn_events(
                 trace.append(
                     {"kind": "tool", "name": d.get("name"), "arguments": d.get("arguments")}
                 )
+            yield event
+            continue
+        if kind == "tool_result":
+            # Stamp the outcome onto the call this result belongs to, so a
+            # RESTORED turn shows the same failed-read marker the live stream
+            # did. Results arrive in call order, so the newest unstamped entry
+            # matching this name is the right one.
+            d = event["data"]
+            if not d.get("ok"):
+                for entry in reversed(trace):
+                    if entry.get("kind") == "tool" and entry.get("name") == d.get("name"):
+                        entry["ok"] = False
+                        break
             yield event
             continue
         if kind != "final":

@@ -824,6 +824,25 @@ class TestAddMutationCoordinator:
         output = capsys.readouterr().out
         assert "[ERROR] add failed for doc.md: boom" in output
 
+    def test_coordinator_exposes_failed_mutation_to_callback(self, tmp_path):
+        from openkb.add_coordinator import AddMutationPlan, run_add_mutation
+        from openkb.locks import kb_ingest_lock
+
+        kb_dir = self._setup_kb(tmp_path)
+        errors = []
+        plan = AddMutationPlan(
+            operation="add",
+            details={"name": "doc.md"},
+            touched_paths=[],
+            body=lambda _snapshot: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+
+        with kb_ingest_lock(kb_dir / ".openkb"):
+            assert run_add_mutation(kb_dir, plan, on_error=errors.append) is False
+
+        assert len(errors) == 1
+        assert str(errors[0]) == "boom"
+
     def test_coordinator_post_commit_failure_does_not_roll_back(self, tmp_path):
         from openkb.add_coordinator import AddMutationPlan, run_add_mutation
         from openkb.locks import kb_ingest_lock

@@ -17,22 +17,30 @@ import pytest
 from openkb.agent.skills import (
     DEFAULT_SKILL_ROOTS,
     _parse_frontmatter,
+    read_skill_support_file,
     scan_local_skills,
 )
 
 
 @pytest.fixture(autouse=True)
 def _isolate_home(monkeypatch, tmp_path):
-    """Point ``$HOME`` at the test's tmp_path so the scanner's default
-    ``~/.openkb/skills`` and ``~/.claude/skills`` roots resolve to empty
-    locations under the test sandbox — otherwise the user's real
-    installed skills leak into every test."""
+    """Point ``$HOME`` at the test's tmp_path and blank the bundled roots.
+
+    The scanner no longer reads anything under ``$HOME``, so this is now a
+    belt-and-braces guard: if a home-based root is ever reintroduced, these
+    unit tests must not silently start picking up the developer's real
+    installed skills. Bundled roots are neutralized so the tests exercise the
+    scanning primitive in isolation; bundled discovery is covered explicitly.
+    """
     fake_home = tmp_path / "isolated-home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
-    # Neutralize the package-bundled roots so these unit tests exercise the
-    # scanning primitive in isolation; bundled discovery is covered explicitly.
     monkeypatch.setattr("openkb.agent.skills.BUNDLED_SKILL_ROOTS", ())
+
+
+def _scan(kb_dir: Path, root: Path):
+    """Scan one explicit root — the only way a non-bundled dir is ever read."""
+    return scan_local_skills(kb_dir, extra_roots=(str(root),))
 
 
 def _write_skill(
@@ -59,10 +67,10 @@ def test_scan_returns_empty_when_no_skill_roots_exist(tmp_path: Path):
     assert scan_local_skills(tmp_path) == []
 
 
-def test_scan_finds_kb_local_skills(tmp_path: Path):
+def test_scan_finds_skills_in_an_explicit_root(tmp_path: Path):
     _write_skill(tmp_path / "skills", "alpha")
     _write_skill(tmp_path / "skills", "beta")
-    skills = scan_local_skills(tmp_path)
+    skills = _scan(tmp_path, tmp_path / "skills")
     names = {s["name"] for s in skills}
     assert names == {"alpha", "beta"}
 
@@ -71,7 +79,7 @@ def test_scan_returns_sdk_shape(tmp_path: Path):
     """SDK contract: each entry has 'name', 'description', 'path' keys
     of type str. ``path`` is absolute (resolved)."""
     sk_dir = _write_skill(tmp_path / "skills", "shape-check")
-    skills = scan_local_skills(tmp_path)
+    skills = _scan(tmp_path, tmp_path / "skills")
     assert len(skills) == 1
     s = skills[0]
     assert set(s.keys()) == {"name", "description", "path"}
@@ -86,7 +94,7 @@ def test_scan_skips_dirs_without_skill_md(tmp_path: Path):
     (tmp_path / "skills" / "no-skill-here").mkdir(parents=True)
     (tmp_path / "skills" / "no-skill-here" / "README.md").write_text("nope")
     _write_skill(tmp_path / "skills", "real-skill")
-    skills = scan_local_skills(tmp_path)
+    skills = _scan(tmp_path, tmp_path / "skills")
     assert [s["name"] for s in skills] == ["real-skill"]
 
 
@@ -98,19 +106,18 @@ def test_scan_skips_skill_without_description(tmp_path: Path):
     (sk_dir / "SKILL.md").write_text("---\nname: no-desc\n---\nbody")
     # And one well-formed one for control
     _write_skill(tmp_path / "skills", "well-formed")
-    skills = scan_local_skills(tmp_path)
+    skills = _scan(tmp_path, tmp_path / "skills")
     assert [s["name"] for s in skills] == ["well-formed"]
 
 
 def test_scan_falls_back_to_dir_name_when_frontmatter_omits_name(tmp_path: Path):
     """If frontmatter has ``description`` but no ``name``, the scanner
     uses the directory name as a sane default. This lets a user drop a
-    skill into ``~/.openkb/skills/my-deck/`` without writing the name
-    twice."""
+    skill directory without writing the name twice."""
     sk_dir = tmp_path / "skills" / "dir-name-only"
     sk_dir.mkdir(parents=True)
     (sk_dir / "SKILL.md").write_text("---\ndescription: x\n---\nbody")
-    skills = scan_local_skills(tmp_path)
+    skills = _scan(tmp_path, tmp_path / "skills")
     assert [s["name"] for s in skills] == ["dir-name-only"]
 
 
@@ -120,55 +127,64 @@ def test_scan_truncates_long_description_to_1024(tmp_path: Path):
     that surfaces this string can't be overrun."""
     long_desc = "a" * 5000
     _write_skill(tmp_path / "skills", "verbose", description=long_desc)
-    skills = scan_local_skills(tmp_path)
+    skills = _scan(tmp_path, tmp_path / "skills")
     assert len(skills) == 1
     assert len(skills[0]["description"]) == 1024
 
 
-def test_scan_first_hit_wins_across_roots(tmp_path: Path, monkeypatch):
-    """When the same skill name lives in multiple roots, the EARLIER
-    root wins. This is what lets a user override a built-in skill by
-    dropping a same-named SKILL.md into ``<kb>/skills/``."""
-    # Point the home-global root at a tmp location (so the test doesn't
-    # rely on the real ~/.openkb/skills state)
-    home_root = tmp_path / "home-openkb-skills"
-    home_root.mkdir()
-    _write_skill(home_root, "dup", description="HOME version")
+def test_scan_first_hit_wins_across_roots(tmp_path: Path):
+    """When the same skill name lives in multiple roots, the EARLIER root
+    wins — the precedence that lets an explicit root override a built-in."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _write_skill(first, "dup", description="FIRST version")
+    _write_skill(second, "dup", description="SECOND version")
 
-    kb_local = tmp_path / "skills"
-    _write_skill(kb_local, "dup", description="KB-LOCAL version")
-
-    # extra_roots is APPENDED, so home_root (passed explicitly here)
-    # comes after the default kb-local "skills/" — kb-local wins.
-    skills = scan_local_skills(tmp_path, extra_roots=(str(home_root),))
+    skills = scan_local_skills(tmp_path, extra_roots=(str(first), str(second)))
     dup = next(s for s in skills if s["name"] == "dup")
-    assert dup["description"] == "KB-LOCAL version"
+    assert dup["description"] == "FIRST version"
 
 
-def test_scan_extra_roots_appended_after_defaults(tmp_path: Path):
-    """``extra_roots`` come AFTER the built-in defaults — they're a
-    courtesy for callers that want to scan additional locations,
-    not a way to override default order."""
+def test_scan_extra_roots_are_the_only_non_bundled_source(tmp_path: Path):
+    """A caller-named root is read; the same directory is invisible without
+    that explicit opt-in."""
     extra = tmp_path / "extra"
     _write_skill(extra, "extra-only")
-    skills = scan_local_skills(tmp_path, extra_roots=(str(extra),))
-    assert "extra-only" in {s["name"] for s in skills}
+    assert "extra-only" in {s["name"] for s in _scan(tmp_path, extra)}
+    assert scan_local_skills(tmp_path) == []
 
 
-def test_scan_default_roots_listed(tmp_path: Path):
-    """The module's published constant matches expectations — pin it so
-    a refactor doesn't silently change which dirs are searched."""
-    assert DEFAULT_SKILL_ROOTS == (
-        "skills",
-        "~/.openkb/skills",
-        "~/.claude/skills",
-    )
+# ─── isolation from other tools' skills ─────────────────────────────────
+
+
+def test_no_roots_are_auto_scanned(tmp_path: Path):
+    """OpenKB must scan NOTHING outside its own package by default.
+
+    Regression guard for the "universal skill loader": it swept
+    ``~/.claude/skills`` and injected every Claude Code skill's
+    name+description into OpenKB's chat prompt, so a knowledge base's
+    answers could be steered by instructions belonging to another tool.
+    """
+    assert DEFAULT_SKILL_ROOTS == ()
+
+
+@pytest.mark.parametrize("root", ["skills", ".openkb/skills", ".claude/skills"])
+def test_previously_swept_roots_are_ignored(tmp_path: Path, monkeypatch, root: Path):
+    """The three roots the scanner used to sweep must stay invisible.
+
+    Covers both the home-relative pair (resolved from ``$HOME``, pointed at
+    the sandbox by the autouse fixture) and the KB-relative ``skills/``.
+    """
+    home = Path(tmp_path / "isolated-home")
+    for base in (tmp_path, home):
+        _write_skill(base / root, "leaked-skill", description="must not be loaded")
+    assert scan_local_skills(tmp_path) == []
 
 
 def test_scan_includes_bundled_skills(tmp_path: Path, monkeypatch):
-    """Skills shipped with the package (deck themes / critic) are
-    discovered even for a KB with no local ``skills/`` — this is what makes
-    ``deck new`` work right after ``pip install``."""
+    """Skills shipped with the package (deck themes / critic) are still
+    discovered — this is what makes ``deck new`` work right after install,
+    and after this change it is the ONLY automatic source."""
     bundled = tmp_path / "bundled"
     _write_skill(bundled, "openkb-deck-neon", description="built-in deck theme")
     monkeypatch.setattr("openkb.agent.skills.BUNDLED_SKILL_ROOTS", (str(bundled),))
@@ -176,15 +192,16 @@ def test_scan_includes_bundled_skills(tmp_path: Path, monkeypatch):
     assert "openkb-deck-neon" in names
 
 
-def test_kb_skill_overrides_bundled(tmp_path: Path, monkeypatch):
-    """Bundled roots are scanned last (lowest priority): a same-named skill
-    in the KB wins, so users can customize a built-in theme."""
+def test_explicit_root_overrides_bundled(tmp_path: Path, monkeypatch):
+    """Bundled roots are scanned last (lowest priority), so a caller that
+    names its own root can still customize a built-in theme."""
     bundled = tmp_path / "bundled"
     _write_skill(bundled, "openkb-deck-neon", description="BUILT-IN")
     monkeypatch.setattr("openkb.agent.skills.BUNDLED_SKILL_ROOTS", (str(bundled),))
-    _write_skill(tmp_path / "skills", "openkb-deck-neon", description="KB OVERRIDE")
-    match = next(s for s in scan_local_skills(tmp_path) if s["name"] == "openkb-deck-neon")
-    assert match["description"] == "KB OVERRIDE"
+    override = tmp_path / "override"
+    _write_skill(override, "openkb-deck-neon", description="EXPLICIT OVERRIDE")
+    match = next(s for s in _scan(tmp_path, override) if s["name"] == "openkb-deck-neon")
+    assert match["description"] == "EXPLICIT OVERRIDE"
 
 
 # ─── _parse_frontmatter ──────────────────────────────────────────────────
@@ -240,3 +257,97 @@ def test_parse_frontmatter_preserves_body_with_dashes():
     meta, body = _parse_frontmatter(text)
     assert meta == {"name": "foo", "description": "bar"}
     assert body == "Intro\n\n---\n\nMore body"
+
+
+# ─── read_skill_file ────────────────────────────────────────────────────
+
+
+def test_read_skill_support_file_is_scoped_to_selected_skill(tmp_path: Path):
+    skill = _write_skill(tmp_path / "skills", "demo")
+    reference = skill / "references" / "guide.md"
+    reference.parent.mkdir()
+    reference.write_text("GUIDE", encoding="utf-8")
+    assert read_skill_support_file(skill, "references/guide.md") == "GUIDE"
+    assert read_skill_support_file(skill, "../other/SKILL.md").startswith("Access denied:")
+    assert read_skill_support_file(skill, "references/missing.md").startswith("File not found:")
+
+
+def _skill_file_tool(kb_dir: Path):
+    from openkb.agent.query import build_chat_agent
+
+    agent = build_chat_agent(kb_dir, "gpt-4o-mini")
+    return next(t for t in agent.tools if t.name == "read_skill_file")
+
+
+def _ctx():
+    from agents.tool_context import ToolContext
+
+    return ToolContext(context=None, tool_name="t", tool_call_id="c", tool_arguments="{}")
+
+
+@pytest.fixture
+def _bundled_skill(tmp_path, monkeypatch):
+    """A bundled skill with a references/ tree, like the real ask-pm."""
+    bundled = tmp_path / "bundled"
+    sk = _write_skill(bundled, "demo")
+    (sk / "references" / "lanes").mkdir(parents=True)
+    (sk / "references" / "guide.md").write_text("GUIDE BODY", encoding="utf-8")
+    (sk / "references" / "lanes" / "01.md").write_text("LANE BODY", encoding="utf-8")
+    monkeypatch.setattr("openkb.agent.skills.BUNDLED_SKILL_ROOTS", (str(bundled),))
+    kb = tmp_path / "kb"
+    (kb / "wiki").mkdir(parents=True)
+    (kb / ".openkb").mkdir()
+    return kb
+
+
+@pytest.mark.asyncio
+async def test_read_skill_file_reads_a_nested_reference(_bundled_skill):
+    """Progressive-disclosure skills put their playbooks under references/;
+    without this tool only SKILL.md was reachable and the rest was dead weight."""
+    import json
+
+    tool = _skill_file_tool(_bundled_skill)
+    out = await tool.on_invoke_tool(
+        _ctx(), json.dumps({"name": "demo", "path": "references/lanes/01.md"})
+    )
+    assert out == "LANE BODY"
+
+
+@pytest.mark.asyncio
+async def test_read_skill_file_rejects_traversal(_bundled_skill):
+    """A path escaping the skill dir must be refused, not read."""
+    import json
+
+    tool = _skill_file_tool(_bundled_skill)
+    out = await tool.on_invoke_tool(
+        _ctx(), json.dumps({"name": "demo", "path": "../../../etc/passwd"})
+    )
+    assert out.startswith("Access denied:")
+
+
+@pytest.mark.asyncio
+async def test_read_skill_file_reports_missing_file_in_band(_bundled_skill):
+    """Failures are RETURNED (a raise would abort the run) and use a prefix
+    is_tool_failure recognizes, so the UI renders a failed step."""
+    import json
+
+    from openkb.agent.tools import is_tool_failure
+
+    tool = _skill_file_tool(_bundled_skill)
+    out = await tool.on_invoke_tool(
+        _ctx(), json.dumps({"name": "demo", "path": "references/gone.md"})
+    )
+    assert is_tool_failure(out)
+
+
+@pytest.mark.asyncio
+async def test_read_skill_file_rejects_unknown_skill(_bundled_skill):
+    import json
+
+    from openkb.agent.tools import is_tool_failure
+
+    tool = _skill_file_tool(_bundled_skill)
+    out = await tool.on_invoke_tool(
+        _ctx(), json.dumps({"name": "nope", "path": "references/guide.md"})
+    )
+    assert is_tool_failure(out)
