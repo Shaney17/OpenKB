@@ -19,6 +19,7 @@ export interface GraphData {
 export interface WikiDocument {
   hash: string
   name: string
+  doc_name?: string | null
   type: string
   display_type: string
   pages: number | null

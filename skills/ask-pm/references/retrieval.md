@@ -7,7 +7,7 @@ Skill này chạy trong OpenKB. Các tool dưới đây là function tool của 
 - Project Confluence: wiki cha là container. Gọi search_spaces(query) để tìm trên mọi child space, hoặc truyền spaces_filter khi người dùng chỉ định space. Kết quả có space, path, tier, score và excerpt. Đọc toàn văn bằng read_space_page(space, path). list_spaces cho biết space và trạng thái sync.
 - KB thường: đọc read_file("index.md") để định hướng, sau đó gọi read_file(path) riêng cho từng trang concepts/, summaries/ hoặc entities/. Không có search_spaces nếu KB không phải project.
 
-Với project, khi gọi read_space_page, path là đường dẫn bên trong space, ví dụ concepts/order-execution.md. Khi dẫn nguồn trong Workbench, dùng dạng [[concepts/PM/order-execution|Luồng xử lý lệnh]]: loại trang, space, tên trang. Với KB thường, bỏ phần PM. Chỉ dẫn link tới trang đã thực sự đọc. Wikilink ở child wiki không kèm space; giữ nguyên space khi lần theo.
+Với project, khi gọi read_space_page, path là đường dẫn bên trong space, ví dụ concepts/order-execution.md. Concept/entity/summary chỉ phục vụ tra cứu và suy luận nội bộ, không phải tài liệu được trả ra làm nguồn. Khi dẫn nguồn trong câu trả lời, chỉ dùng trang gốc đã đọc và quote_source xác minh: [[PM/sources/doc_name|Title của page Confluence]]. Với KB thường dùng [[sources/doc_name|Title tài liệu]]. Wikilink ở child wiki không kèm space; giữ nguyên space khi lần theo.
 
 Không coi index cha rỗng là không có tài liệu. Không lấy số lượng hit hoặc điểm tìm kiếm làm độ tin cậy nghiệp vụ.
 

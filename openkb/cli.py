@@ -3804,6 +3804,7 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
             {
                 "hash": file_hash,
                 "name": name,
+                "doc_name": meta.get("doc_name"),
                 "type": raw_type,
                 "display_type": _display_type(raw_type),
                 "pages": pages if pages not in ("", 0) else None,

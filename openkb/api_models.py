@@ -149,6 +149,7 @@ class LintRequest(BaseModel):
 class DocumentItem(BaseModel):
     hash: str
     name: str
+    doc_name: str | None = None
     type: str
     display_type: str
     pages: int | None = None

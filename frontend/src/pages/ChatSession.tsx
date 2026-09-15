@@ -12,7 +12,7 @@ import ArtifactPanel, { artifactKey } from "@/components/ArtifactPanel"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet"
-import { getGraph, getPage } from "@/api/wiki"
+import { getGraph, getKbInventory, getPage } from "@/api/wiki"
 import { listKbs } from "@/api/kb"
 import { stripFrontmatter } from "@/lib/frontmatter"
 import { runDeckCommand, runSkillCommand } from "@/api/artifacts"
@@ -108,6 +108,32 @@ interface PanelState {
 
 const CLOSED_PANEL: PanelState = { open: false, path: "", content: null, error: null, loading: false }
 
+/** Replace an internal source slug with the page title from the KB inventory. */
+function sourceTitle(target: string, titles: Record<string, string>): string | undefined {
+  const source = wikiLinkSource(target)
+  if (!source.path?.startsWith("sources/")) return undefined
+  const stem = source.path.slice("sources/".length).replace(/\.(md|json)$/i, "")
+  return titles[`${source.space || ""}/${stem}`]
+}
+
+function displaySourceLinks(text: string, titles: Record<string, string>): string {
+  const wikilinks = text.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (token, target: string) => {
+    const title = sourceTitle(target, titles)
+    if (title) return `[[${target}|${title.replace(/\|/g, "-")}]]`
+    // A saved answer may contain legacy links to compiled wiki pages. Show
+    // their label as context, but never offer them as clickable source docs.
+    if (/^(?:[^/]+\/)?(?:concepts|entities|summaries|reports)\//.test(target)) {
+      const alias = token.slice(2, -2).split("|").slice(1).join("|").trim()
+      return alias || target
+    }
+    return token
+  })
+  return wikilinks.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (token, _label: string, target: string) => {
+    const title = sourceTitle(target, titles)
+    return title ? `[${title}](${target})` : token
+  })
+}
+
 /**
  * One tool-read step in the interleaved turn trace: a compact status line that
  * shows a spinner while the read is in flight and a green ✅ once it resolves.
@@ -117,16 +143,21 @@ const CLOSED_PANEL: PanelState = { open: false, path: "", content: null, error: 
  */
 function ToolStep({
   source,
+  sourceTitles,
   done,
   ok,
   onOpen,
 }: {
   source: Source
+  sourceTitles: Record<string, string>
   done: boolean
   ok?: boolean
   onOpen: (s: Source) => void
 }) {
   const { t } = useTranslation("chat")
+  const displayLabel = source.kind === "page"
+    ? sourceTitle(`${source.space ? `${source.space}/` : ""}${source.path || ""}`, sourceTitles) || source.label
+    : source.label
   const failed = ok === false
   const TypeIcon = source.kind === "page" ? FileText : source.kind === "search" ? Search : BookText
   const base =
@@ -154,7 +185,7 @@ function ToolStep({
                 ? "chat:step.readFailed"
                 : "chat:step.read"
           }
-          values={{ path: source.label }}
+          values={{ path: displayLabel }}
           components={[<span className="font-mono2 text-foreground" />]}
         />
       </span>
@@ -192,11 +223,13 @@ function ToolStep({
 
 function AssistantMessage({
   turn,
+  sourceTitles,
   onOpen,
   onOpenCitation,
   onOpenArtifact,
 }: {
   turn: ChatTurnState
+  sourceTitles: Record<string, string>
   onOpen: (s: Source) => void
   onOpenCitation: (c: Citation) => void
   onOpenArtifact: (a: Artifact) => void
@@ -227,14 +260,17 @@ function AssistantMessage({
               step.text.trim() ? (
                 <div key={`step-${i}`} className="text-[14px]">
                   <MarkdownView
-                    source={step.text}
-                    onWikiLink={(target) => onOpen(wikiLinkSource(target))}
+                    source={displaySourceLinks(step.text, sourceTitles)}
+                    onWikiLink={(target) => {
+                      const source = wikiLinkSource(target)
+                      if (source.path?.startsWith("sources/")) onOpen(source)
+                    }}
                   />
                 </div>
               ) : null
             ) : (
               <div key={`step-${i}`}>
-                <ToolStep source={step.source} done={step.done} ok={step.ok} onOpen={onOpen} />
+                <ToolStep source={step.source} sourceTitles={sourceTitles} done={step.done} ok={step.ok} onOpen={onOpen} />
               </div>
             ),
           )}
@@ -342,6 +378,21 @@ export default function ChatSession() {
   // Stop button gates on this so it never appears as a visible no-op.
   const [stoppable, setStoppable] = useState(false)
   const [panel, setPanel] = useState<PanelState>(CLOSED_PANEL)
+  const [sourceTitles, setSourceTitles] = useState<Record<string, string>>({})
+  const [readerWidth, setReaderWidth] = useState(560)
+  useEffect(() => {
+    if (!kb) { setSourceTitles({}); return }
+    let active = true
+    getKbInventory(kb).then((inventory) => {
+      if (!active) return
+      const titles: Record<string, string> = {}
+      for (const doc of inventory.documents) {
+        if (doc.doc_name) titles[`${doc.space || ""}/${doc.doc_name}`] = doc.name
+      }
+      setSourceTitles(titles)
+    }).catch(() => { if (active) setSourceTitles({}) })
+    return () => { active = false }
+  }, [kb])
   const quoteRef = useRef<HTMLElement>(null)
   useEffect(() => {
     if (panel.open && panel.highlight && panel.content !== null) {
@@ -684,7 +735,8 @@ export default function ChatSession() {
     try {
       const r = await getPage(kbRef.current, s.path, s.space)
       const content = stripFrontmatter(r.content)
-      const title = /^# (.+)$/m.exec(content)?.[1]?.trim()
+      const title = sourceTitle(`${s.space ? `${s.space}/` : ""}${s.path}`, sourceTitles)
+        || /^# (.+)$/m.exec(content)?.[1]?.trim()
       setPanel({
         open: true, path: s.label, title: s.path.startsWith("sources/") ? title : undefined,
         content, error: null, loading: false,
@@ -760,6 +812,7 @@ export default function ChatSession() {
               <AssistantMessage
                 key={m.id}
                 turn={m.turn}
+                sourceTitles={sourceTitles}
                 onOpen={openSource}
                 onOpenCitation={openCitation}
                 onOpenArtifact={setPanelArtifact}
@@ -799,7 +852,30 @@ export default function ChatSession() {
 
       {/* 来源侧栏：点击 read_file 来源打开真实页面 */}
       <Sheet open={panel.open} onOpenChange={(o) => setPanel((p) => ({ ...p, open: o }))}>
-        <SheetContent side="right" className="w-full sm:max-w-[560px] overflow-y-auto">
+        <SheetContent side="right" className="w-full sm:max-w-none overflow-y-auto" style={{ width: readerWidth, maxWidth: "100vw" }}>
+          <div
+            role="separator"
+            aria-label="Resize document preview"
+            aria-orientation="vertical"
+            tabIndex={0}
+            className="absolute inset-y-0 left-0 z-10 w-2 cursor-ew-resize hover:bg-accent-brand/20 focus:bg-accent-brand/20 touch-none"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              const grip = event.currentTarget
+              grip.setPointerCapture(event.pointerId)
+            }}
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+              setReaderWidth(Math.max(360, Math.min(window.innerWidth - 48, window.innerWidth - event.clientX)))
+            }}
+            onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                event.preventDefault()
+                setReaderWidth((width) => Math.max(360, Math.min(window.innerWidth - 48, width + (event.key === "ArrowLeft" ? 40 : -40))))
+              }
+            }}
+          />
           <SheetHeader>
             <SheetTitle className="text-[14px] break-words">{panel.title || `wiki/${panel.path}`}</SheetTitle>
           </SheetHeader>

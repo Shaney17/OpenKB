@@ -876,6 +876,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
         {
             "hash": "abc123",
             "name": "paper.pdf",
+            "doc_name": None,
             "type": "pdf",
             "display_type": "short",
             "pages": 12,
@@ -885,6 +886,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
         {
             "hash": "def456",
             "name": "notes.md",
+            "doc_name": None,
             "type": "md",
             "display_type": "short",
             "pages": None,
@@ -3609,6 +3611,26 @@ def test_list_endpoint_leaves_a_plain_kb_alone(monkeypatch, kb_dir):
     body = client.post("/api/v1/list", json={"kb": kb}, headers=_auth()).json()
 
     assert body["concepts"] == ["a"]
+
+
+def test_list_endpoint_exposes_source_title_and_doc_name(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    (kb_dir / ".openkb" / "hashes.json").write_text(
+        json.dumps({
+            "h": {
+                "name": "confluence-site-pm-123.md",
+                "doc_name": "confluence-site-pm-123",
+                "source_title": "Khớp lệnh",
+                "type": "md",
+                "path": ".openkb/sources/confluence/site/pm/123.md",
+            }
+        }),
+        encoding="utf-8",
+    )
+    body = client.post("/api/v1/list", json={"kb": kb}, headers=_auth()).json()
+    assert body["documents"][0]["name"] == "Khớp lệnh"
+    assert body["documents"][0]["doc_name"] == "confluence-site-pm-123"
 
 
 def test_page_endpoint_opens_a_space_qualified_path(monkeypatch, kb_dir):

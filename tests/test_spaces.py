@@ -345,6 +345,7 @@ class TestProjectInventory:
         inv = project_inventory(kb)
         assert inv["document_count"] == 1
         assert inv["documents"][0]["space"] == "PM"
+        assert inv["documents"][0]["doc_name"] is None
 
     def test_confluence_documents_carry_source_type(self, tmp_path):
         kb = _project_kb(tmp_path / "kb", {"PM": {}})

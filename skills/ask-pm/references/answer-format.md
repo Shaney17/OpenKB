@@ -12,13 +12,13 @@ Kết luận trước trong 1–2 câu, kèm mức chắc chắn khi chưa VERIF
 
 Giải thích bản chất, điều kiện áp dụng, ngoại lệ được tài liệu ghi, dữ liệu còn thiếu và bước tiếp theo. Với luồng nhiều nhánh, dùng danh sách bước và bảng “Nếu… thì…”. Với phép tính, ghi rõ công thức có nguồn, đầu vào, đơn vị, phép thế từng bước và làm tròn trung gian.
 
-Bảng Nguồn là bắt buộc khi có khẳng định nghiệp vụ. Các wikilink đến trang compile chỉ để điều hướng nội bộ, không phải citation; citation là thẻ quote_source đã xác minh từ tài liệu gốc hiển thị dưới câu trả lời:
+Bảng Nguồn là bắt buộc khi có khẳng định nghiệp vụ. Chỉ liệt kê tài liệu gốc dưới `sources/` đã đọc và đã được `quote_source` xác minh. Không đưa index, concepts, entities, summaries hoặc reports vào bảng Nguồn hay danh sách tài liệu trích dẫn. Các trang compile chỉ dùng để suy luận nội bộ, không hiển thị thành tài liệu nguồn. Citation là thẻ `quote_source` hiển thị dưới câu trả lời:
 
-| Trang OpenKB | Vai trò | Tài liệu gốc |
-|---|---|---|
-| [[concepts/PM/order-execution\|Luồng xử lý lệnh]] | Concept | Chỉ thêm link Confluence nếu đã đọc source_url |
+| Tài liệu gốc | Câu đã đối chiếu |
+|---|---|
+| [[PM/sources/confluence-site-pm-123\|Tên page Confluence]] | Câu nguyên văn được quote_source xác minh |
 
-Đường dẫn link project là loại trang/space/tên trang, không có đuôi .md. Link KB thường là loại trang/tên trang. Dùng đúng path từ kết quả tìm kiếm hoặc frontmatter; không bịa tên trang hay URL. Bảng nguồn nội bộ có thể ghi “Chưa truy được” ở cột tài liệu gốc.
+Đường dẫn tài liệu project là `SPACE/sources/doc_name`, KB thường là `sources/doc_name`; alias phải là title của page từ frontmatter tài liệu gốc, không phải slug kỹ thuật. Dùng đúng path đã đọc; không bịa tên trang, câu quote hay URL. Nếu chưa truy được tài liệu gốc, nói rõ thiếu nguồn và không đưa trang compile vào bảng thay thế.
 
 ## Phần 2 — Bản gửi khách hàng
 

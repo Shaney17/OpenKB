@@ -44,7 +44,7 @@ Yêu cầu khiếu nại, ưu đãi hoặc chính sách mới ngoài tài liệu
 ## Cấu trúc trả lời
 
 - Trả lời nhanh: kết luận và mức chắc chắn trong 1–2 câu.
-- Phần 1 — Cho WS/WA hiểu: cơ chế, điều kiện, ngoại lệ, phép tính từng bước nếu có, bảng Nguồn có wikilink mở được trong OpenKB.
+- Phần 1 — Cho WS/WA hiểu: cơ chế, điều kiện, ngoại lệ, phép tính từng bước nếu có; bảng Nguồn chỉ gồm tài liệu gốc `sources/` đã được `quote_source` xác minh, hiển thị theo title page. Không hiển thị concept/entity/summary như tài liệu nguồn.
 - Phần 2 — Bản gửi khách: đoạn ngắn, sạch thông tin nội bộ, chỉ khi VERIFIED và không còn vấn đề hiệu lực/phê duyệt. Nếu chưa đủ căn cứ, ghi rõ chưa thể soạn.
 - Lưu ý trước khi gửi: những điểm phải kiểm tra hoặc cần PM duyệt.
 
