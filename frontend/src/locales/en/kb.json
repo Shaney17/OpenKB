@@ -31,7 +31,8 @@
     }
   },
   "docs": {
-    "heading": "Uploaded documents · {{count}}",
+    "heading": "Documents · {{count}}",
+    "confluenceSource": "Confluence",
     "empty": "No documents yet · they compile into the KB automatically after upload",
     "pages_one": "{{count}} page",
     "pages_other": "{{count}} pages",

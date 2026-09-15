@@ -31,7 +31,8 @@
     }
   },
   "docs": {
-    "heading": "已上传文档 · {{count}}",
+    "heading": "文档 · {{count}}",
+    "confluenceSource": "Confluence",
     "empty": "暂无文档 · 上传后会自动编译进知识库",
     "pages_one": "{{count}} 页",
     "pages_other": "{{count}} 页",

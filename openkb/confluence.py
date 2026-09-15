@@ -388,6 +388,25 @@ def _registered_doc_name(kb_dir: Path, source_path: Path) -> str:
     return str(meta.get("doc_name")) if meta and meta.get("doc_name") else source_path.stem
 
 
+def _set_registered_source_title(kb_dir: Path, doc_name: str, title: str) -> None:
+    """Persist a Confluence page title without changing its stable wiki name.
+
+    ``doc_name`` is an internal identifier used by compiled artifacts and
+    wikilinks, so renaming it when a Confluence title changes would break
+    references.  ``source_title`` is the human-facing name exposed by the API.
+    """
+    registry = HashRegistry(kb_dir / ".openkb" / "hashes.json")
+    for file_hash, current in registry.all_entries().items():
+        if current.get("doc_name") != doc_name:
+            continue
+        if current.get("source_title") == title:
+            return
+        metadata = dict(current)
+        metadata["source_title"] = title
+        registry.add(file_hash, metadata)
+        return
+
+
 def sync_confluence(
     kb_dir: Path,
     client: ConfluenceClient,
@@ -428,6 +447,12 @@ def sync_confluence(
         digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
         previous = entries.get(identity)
         if previous and previous.get("content_hash") == digest:
+            doc_name = str(previous.get("doc_name") or "")
+            if doc_name:
+                _set_registered_source_title(kb_dir, doc_name, page.title)
+            if previous.get("title") != page.title:
+                previous["title"] = page.title
+                atomic_write_json(_manifest_path(kb_dir), manifest)
             result.unchanged += 1
             continue
         if dry_run:
@@ -458,6 +483,8 @@ def sync_confluence(
             suffix = f": {failure_detail}" if failure_detail else ""
             result.errors.append(f"{page.title} ({page.id}): compilation failed{suffix}")
             continue
+        doc_name = _registered_doc_name(kb_dir, source_path)
+        _set_registered_source_title(kb_dir, doc_name, page.title)
         entries[identity] = {
             "base_url": client.base_url,
             "space_id": page.space_id,
@@ -466,7 +493,8 @@ def sync_confluence(
             "page_id": page.id,
             "version": page.version,
             "content_hash": digest,
-            "doc_name": _registered_doc_name(kb_dir, source_path),
+            "doc_name": doc_name,
+            "title": page.title,
             "source_path": source_path.relative_to(kb_dir).as_posix(),
         }
         atomic_write_json(_manifest_path(kb_dir), manifest)

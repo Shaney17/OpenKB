@@ -3784,13 +3784,19 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
     for file_hash, meta in hashes.items():
         raw_type = meta.get("type", "unknown")
         pages = meta.get("pages")
+        origin_path = str(meta.get("path") or "").replace("\\", "/")
         documents.append(
             {
                 "hash": file_hash,
-                "name": meta.get("name", "unknown"),
+                "name": meta.get("source_title") or meta.get("name", "unknown"),
                 "type": raw_type,
                 "display_type": _display_type(raw_type),
                 "pages": pages if pages not in ("", 0) else None,
+                "source_type": (
+                    "confluence"
+                    if origin_path.startswith(".openkb/sources/confluence/")
+                    else "local"
+                ),
             }
         )
 

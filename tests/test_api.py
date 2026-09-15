@@ -861,6 +861,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
             "type": "pdf",
             "display_type": "short",
             "pages": 12,
+            "source_type": "local",
             "space": None,
         },
         {
@@ -869,6 +870,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
             "type": "md",
             "display_type": "short",
             "pages": None,
+            "source_type": "local",
             "space": None,
         },
     ]
@@ -3027,6 +3029,28 @@ def test_kbs_list_reports_confluence_source_and_rollup_status(monkeypatch, tmp_p
     assert items["project-kb"]["space_count"] == 2
     assert items["project-kb"]["source_labels"] == ["OPS", "PM"]
     assert items["project-kb"]["sync_status"] == "partial"
+
+
+def test_kbs_list_recognizes_direct_confluence_sync(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    direct = root / "direct-kb"
+    _make_kb(direct)
+    (direct / ".openkb" / "confluence-sync.json").write_text(
+        json.dumps({"pages": {"one": {}}, "last_spaces": ["PM"]}), encoding="utf-8"
+    )
+    client = _client(monkeypatch)
+    item = next(
+        entry
+        for entry in client.get("/api/v1/kbs", headers=_auth()).json()["knowledge_bases"]
+        if entry["name"] == "direct-kb"
+    )
+    assert item["source_type"] == "confluence"
+    assert item["source_labels"] == ["PM"]
+    assert item["space_count"] == 1
+    assert item["sync_status"] is None
 
 
 def test_kbs_discovery_skips_stale_registered_entry(monkeypatch, tmp_path):

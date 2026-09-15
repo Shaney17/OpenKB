@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from openkb.api_helpers import _resolve_kb, require_bearer_token
 from openkb.api_models import DocumentSourceRequest, DocumentSourceResponse
 from openkb.documents import read_document_source
+from openkb.spaces import space_dir
 
 documents_router = APIRouter()
 
@@ -24,6 +25,11 @@ async def document_source_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> DocumentSourceResponse:
     kb_dir = _resolve_kb(request.kb)
+    if request.space:
+        try:
+            kb_dir = space_dir(kb_dir, request.space)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Confluence space not found.") from exc
     try:
         result = await run_in_threadpool(read_document_source, kb_dir, request.hash)
     except (OSError, ValueError) as exc:

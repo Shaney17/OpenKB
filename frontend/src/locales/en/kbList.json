@@ -13,8 +13,21 @@
   "confluenceSpaces_one": "Confluence · {{count}} space",
   "confluenceSpaces_other": "Confluence · {{count}} spaces",
   "localFiles": "Local files",
+  "confluence": "Confluence",
+  "unknownSource": "Source unavailable",
   "localStatus": "Local",
-  "syncStatus": { "idle": "Not synced", "running": "Syncing", "succeeded": "Synced", "partial": "Partially synced", "failed": "Sync failed" },
+  "filters": {
+    "searchLabel": "Search knowledge bases by name",
+    "searchPlaceholder": "Search knowledge bases…",
+    "sourceLabel": "Filter by source",
+    "statusLabel": "Filter by status",
+    "allSources": "All sources",
+    "allStatuses": "All statuses",
+    "clear": "Clear filters",
+    "emptyTitle": "No matching knowledge bases",
+    "emptyDescription": "Try another name, source, or status."
+  },
+  "syncStatus": { "idle": "Not synced", "running": "Syncing", "succeeded": "Synced", "partial": "Partially synced", "failed": "Sync failed", "unknown": "Status unavailable" },
   "create": {
     "description": "Give your new knowledge base a name. Model and credentials inherit the global defaults and can be adjusted later in its settings.",
     "nameLabel": "Name",

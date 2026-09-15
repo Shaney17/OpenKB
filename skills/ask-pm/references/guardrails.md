@@ -21,7 +21,7 @@ Không gửi số tài khoản, CCCD, email, số điện thoại, họ tên hay
 ## Hai chế độ
 
 - pm_assisted: PM đang tự đọc. Có thể trình bày giả thuyết và đối chiếu source thô nếu dán nhãn rõ; không biến nó thành câu trả lời chính thức.
-- autonomous: không dùng source thô để kết luận, không nêu giả thuyết như sự thật. Với CONFLICT, PM_REVIEW_REQUIRED hay KNOWLEDGE_GAP, dừng ở câu trả lời cần xác minh và không tạo bản gửi khách.
+- autonomous: có thể đọc source thô để kiểm chứng dữ kiện/trích dẫn từ trang compiled, nhưng không dùng source làm căn cứ duy nhất cho kết luận hay nêu giả thuyết như sự thật. Với CONFLICT, PM_REVIEW_REQUIRED hay KNOWLEDGE_GAP, dừng ở câu trả lời cần xác minh và không tạo bản gửi khách.
 - Khi không biết ai sẽ duyệt, chọn autonomous.
 
 Không tự ghi file gap, xuất file hoặc gửi thông tin cho khách nếu người dùng chưa yêu cầu hành động đó.

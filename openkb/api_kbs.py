@@ -19,6 +19,24 @@ from openkb.config import kb_root_dir, registered_kbs
 from openkb.spaces import configured_spaces, space_dir
 
 
+def _direct_confluence_spaces(kb_dir: Path) -> list[str] | None:
+    """Return CLI-synced space keys, or None when this KB has no sync manifest.
+
+    A direct ``openkb sync confluence`` writes confluence-sync.json, not the
+    project/child-space config. Treating only configured child spaces as a
+    Confluence source mislabeled these standalone KBs as local files.
+    """
+    path = kb_dir / ".openkb" / "confluence-sync.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        spaces = data.get("last_spaces", []) if isinstance(data, dict) else []
+        return [str(space) for space in spaces if isinstance(space, str)]
+    except (OSError, ValueError):
+        return []
+
+
 def _kb_list_item(kb_dir: Path, name: str) -> dict[str, Any]:
     """Build one KB-list item: name + resolved path + rollup counters.
 
@@ -31,6 +49,7 @@ def _kb_list_item(kb_dir: Path, name: str) -> dict[str, Any]:
     # hashes.json is empty and the switcher showed a fully-synced project as
     # "0". Roll the children up instead.
     spaces = configured_spaces(kb_dir)
+    direct_spaces = _direct_confluence_spaces(kb_dir) if not spaces else None
     roots = [space_dir(kb_dir, key) for key in sorted(spaces)] or [kb_dir]
     doc_count = 0
     for root in roots:
@@ -67,15 +86,21 @@ def _kb_list_item(kb_dir: Path, name: str) -> dict[str, Any]:
         sync_status = "succeeded"
     else:
         sync_status = "idle" if spaces else None
+    is_confluence = bool(spaces) or direct_spaces is not None
+    source_labels = (
+        [str(space.get("label") or key) for key, space in sorted(spaces.items())]
+        if spaces
+        else direct_spaces or []
+    )
     return {
         "name": name,
         "path": str(kb_dir),
         "document_count": doc_count,
         "last_compile": last_compile,
         "has_raw": (kb_dir / "raw").is_dir(),
-        "source_type": "confluence" if spaces else "local",
-        "space_count": len(spaces),
-        "source_labels": [str(space.get("label") or key) for key, space in sorted(spaces.items())],
+        "source_type": "confluence" if is_confluence else "local",
+        "space_count": len(spaces) if spaces else len(direct_spaces or []),
+        "source_labels": source_labels,
         "sync_status": sync_status,
     }
 

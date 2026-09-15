@@ -86,7 +86,7 @@ def read_document_source(kb_dir: Path, file_hash: str) -> dict[str, Any] | None:
 
     return {
         "hash": file_hash,
-        "name": meta.get("name", doc_name),
+        "name": meta.get("source_title") or meta.get("name", doc_name),
         "doc_name": doc_name,
         "type": meta.get("type", "unknown"),
         "format": "markdown",

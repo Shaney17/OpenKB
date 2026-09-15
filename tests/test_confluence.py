@@ -13,6 +13,7 @@ from openkb.confluence import (
     storage_to_markdown,
     sync_confluence,
 )
+from openkb.state import HashRegistry
 
 
 class _Response:
@@ -142,6 +143,39 @@ def test_sync_is_incremental_and_token_is_never_persisted(tmp_path):
         p.read_text(encoding="utf-8") for p in (tmp_path / ".openkb").rglob("*") if p.is_file()
     )
     assert "secret" not in persisted
+
+
+def test_sync_persists_page_title_for_document_display(tmp_path):
+    (tmp_path / ".openkb").mkdir()
+    hashes_path = tmp_path / ".openkb" / "hashes.json"
+    hashes_path.write_text("{}")
+
+    def ingest(path, kb_dir):
+        HashRegistry(hashes_path).add(
+            "page-hash",
+            {
+                "name": path.name,
+                "doc_name": path.stem,
+                "type": "md",
+                "path": path.relative_to(kb_dir).as_posix(),
+                "source_path": "wiki/sources/page.md",
+            },
+        )
+        return "added"
+
+    sync_confluence(
+        tmp_path,
+        _Client([_page()]),
+        ["ENG"],
+        ingest=ingest,
+        remove=lambda _kb, _doc: {"status": "removed"},
+    )
+
+    metadata = HashRegistry(hashes_path).get("page-hash")
+    assert metadata is not None
+    assert metadata["source_title"] == "Architecture"
+    manifest = json.loads((tmp_path / ".openkb" / "confluence-sync.json").read_text())
+    assert next(iter(manifest["pages"].values()))["title"] == "Architecture"
 
 
 def test_sync_preserves_ingest_failure_detail(tmp_path):

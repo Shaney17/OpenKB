@@ -295,6 +295,20 @@ class TestSearchRanking:
         hits = search_spaces(kb, "orderbook")
         assert [h["path"] for h in hits] == ["sources/big.md"]
 
+    def test_source_survives_when_compiled_pages_fill_the_limit(self, tmp_path):
+        pages = {f"concepts/c{i}.md": "orderbook" for i in range(12)}
+        pages["sources/original.md"] = "orderbook full Confluence document"
+        kb = _project_kb(tmp_path / "kb", {"PM": pages})
+        hits = search_spaces(kb, "orderbook", limit=6)
+        assert len(hits) == 6
+        assert hits[0]["tier"] == "compiled"
+        assert any(hit["path"] == "sources/original.md" for hit in hits)
+
+    def test_project_instructions_require_source_verification(self, tmp_path):
+        kb = _project_kb(tmp_path / "kb", {"PM": {"sources/original.md": "detail"}})
+        agent = build_query_agent(str(kb / "wiki"), "gpt-4o-mini", kb_dir=kb)
+        assert "ORIGINAL full" in agent.instructions
+
 
 class TestProjectInventory:
     def test_merges_every_child_space(self, tmp_path):
@@ -326,6 +340,42 @@ class TestProjectInventory:
         inv = project_inventory(kb)
         assert inv["document_count"] == 1
         assert inv["documents"][0]["space"] == "PM"
+
+    def test_confluence_documents_carry_source_type(self, tmp_path):
+        kb = _project_kb(tmp_path / "kb", {"PM": {}})
+        child = kb / ".openkb" / "spaces" / "pm"
+        (child / ".openkb" / "hashes.json").write_text(
+            json.dumps(
+                {
+                    "h1": {
+                        "name": "page.md",
+                        "type": "md",
+                        "path": ".openkb/sources/confluence/site/pm/page.md",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert project_inventory(kb)["documents"][0]["source_type"] == "confluence"
+
+    def test_confluence_document_uses_source_title(self, tmp_path):
+        kb = _project_kb(tmp_path / "kb", {"PM": {}})
+        child = kb / ".openkb" / "spaces" / "pm"
+        (child / ".openkb" / "hashes.json").write_text(
+            json.dumps(
+                {
+                    "h1": {
+                        "name": "confluence-site-pm-123.md",
+                        "source_title": "Quy trình phê duyệt khoản vay",
+                        "doc_name": "confluence-site-pm-123",
+                        "type": "md",
+                        "path": ".openkb/sources/confluence/site/pm/page.md",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert project_inventory(kb)["documents"][0]["name"] == "Quy trình phê duyệt khoản vay"
 
     def test_plain_kb_inventory_is_untouched(self, tmp_path):
         """Federation is project-only; a normal KB keeps bare stems."""

@@ -137,6 +137,7 @@ class DocumentItem(BaseModel):
     type: str
     display_type: str
     pages: int | None = None
+    source_type: str = "local"
     # Which Confluence space this document came from, for a project KB whose
     # inventory is federated across child space KBs. None for a plain KB.
     space: str | None = None
@@ -297,6 +298,9 @@ class DocumentSourceRequest(BaseModel):
     # SHA-256 hash key from /list — the unique document identifier (avoids
     # ambiguity when two documents share a doc_name/filename stem).
     hash: str = Field(..., min_length=1)
+    # Project KB documents live in a child space. The inventory supplies this
+    # key so hashes are resolved in the correct child registry, not the parent.
+    space: str | None = None
 
 
 class DocumentSourceResponse(BaseModel):

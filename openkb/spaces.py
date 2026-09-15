@@ -242,7 +242,19 @@ def search_spaces(
                     "excerpt": excerpt,
                 }
             )
-    return sorted(
+    ranked = sorted(
         hits,
         key=lambda item: (item["tier"] == "source", -item["score"], item["space"], item["path"]),
-    )[:limit]
+    )
+    # A fixed top-N with all compiled pages first could consume every slot:
+    # the agent then sees only summaries/concepts even though a matching full
+    # Confluence page exists under sources/. Reserve some slots for originals.
+    if limit >= 2:
+        compiled = [hit for hit in ranked if hit["tier"] != "source"]
+        sources = [hit for hit in ranked if hit["tier"] == "source"]
+        if compiled and sources:
+            source_slots = min(len(sources), max(1, limit // 3))
+            compiled_hits = compiled[: limit - source_slots]
+            source_hits = sources[: limit - len(compiled_hits)]
+            return [*compiled_hits, *source_hits]
+    return ranked[:limit]

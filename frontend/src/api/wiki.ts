@@ -22,6 +22,7 @@ export interface WikiDocument {
   type: string
   display_type: string
   pages: number | null
+  source_type?: "confluence" | "local"
   /** Confluence space this document came from — set only for a project KB,
    *  whose inventory is federated across its child space KBs. */
   space?: string | null
@@ -85,8 +86,8 @@ export interface DocumentSource {
 }
 
 /** Fetch a document's converted full text by its `hash` (the /list identifier). */
-export function getDocumentSource(kb: string, hash: string): Promise<DocumentSource> {
-  return apiFetch<DocumentSource>("/api/v1/document/source", { body: { kb, hash } })
+export function getDocumentSource(kb: string, hash: string, space?: string | null): Promise<DocumentSource> {
+  return apiFetch<DocumentSource>("/api/v1/document/source", { body: { kb, hash, ...(space ? { space } : {}) } })
 }
 
 /** Result of `/api/v1/page/delete`. `backlinks` are 'section/stem' refs whose

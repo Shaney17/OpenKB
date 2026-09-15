@@ -71,8 +71,10 @@ Override the search strategy above with this one:
    user's own domain terms; retry with different terms before giving up.
 2. Call `read_space_page(space, path)` on the most promising matches to read
    the full page — search returns short excerpts, never enough to answer from.
-   Follow a page's `[[wikilinks]]` by reading them with `read_space_page` in
-   the SAME space.
+   Search includes `source` hits under `sources/`: these are the ORIGINAL full
+   Confluence page texts, not just summaries. For a specific factual claim or
+   citation, read a relevant source hit when available; do not rely only on a
+   summary. Follow `[[wikilinks]]` in the SAME space.
 3. Use `list_spaces()` when you need to know which spaces exist, or when a
    search comes back empty across the board.
 4. Cite pages as `<SPACE>/<path>` so the user can find them again.
@@ -191,14 +193,15 @@ def _build_space_tools(kb_dir: Path) -> list:
 
     @function_tool
     def search_spaces(query: str, spaces_filter: str = "", limit: int = 10) -> str:
-        """Search compiled wiki pages across this project's spaces.
+        """Search compiled wiki and full source pages across project spaces.
 
         This is the PRIMARY way to find content in a project KB. Returns ranked
         matches as ``<SPACE> <path> (tier, score)`` plus a short excerpt; read
         the promising ones in full with ``read_space_page``. ``compiled`` pages
         (concepts/entities/summaries) come first and are the ones to read;
-        ``source`` pages are the raw ingested documents — large, so open one
-        only when a compiled page lacks the detail you need.
+        ``source`` pages are the original full Confluence documents. Some
+        source hits are reserved even when compiled hits are numerous; read a
+        relevant source to verify specific facts and citations.
 
         Args:
             query: Search terms — use the user's own domain vocabulary.
@@ -225,7 +228,7 @@ def _build_space_tools(kb_dir: Path) -> list:
 
     @function_tool
     def read_space_page(space: str, path: str) -> str:
-        """Read one compiled wiki page in full from a project space.
+        """Read a compiled or original source page in full from a space.
 
         Args:
             space: Space key as shown by ``search_spaces`` / ``list_spaces``.

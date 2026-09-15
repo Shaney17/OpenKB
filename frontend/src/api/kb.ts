@@ -7,7 +7,7 @@ export interface KbSummary {
   has_raw: boolean
   /** Absolute directory of this KB (may sit outside the default root). */
   path?: string
-  source_type: "confluence" | "local"
+  source_type: "confluence" | "local" | "unknown"
   space_count: number
   source_labels: string[]
   sync_status: "idle" | "running" | "succeeded" | "partial" | "failed" | null
@@ -38,7 +38,7 @@ function normalizeKbList(value: unknown): KbListResponse {
       last_compile: typeof kb.last_compile === 'string' ? kb.last_compile : null,
       has_raw: kb.has_raw === true,
       path: typeof kb.path === 'string' ? kb.path : undefined,
-      source_type: kb.source_type === 'confluence' ? 'confluence' : 'local',
+      source_type: kb.source_type === 'confluence' || kb.source_type === 'local' ? kb.source_type : 'unknown',
       space_count: typeof kb.space_count === 'number' ? kb.space_count : 0,
       source_labels: Array.isArray(kb.source_labels) ? kb.source_labels.filter((label): label is string => typeof label === 'string') : [],
       sync_status: typeof kb.sync_status === 'string' && ['idle', 'running', 'succeeded', 'partial', 'failed'].includes(kb.sync_status)

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import * as Dialog from '@radix-ui/react-dialog'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { FileText, Link2, Loader2, Pencil, Upload, RefreshCw, Settings2, Trash2, Circle, CheckCircle2, CircleSlash2, XCircle, X, BookOpen, Layers3 } from 'lucide-react'
+import { ArrowLeft, FileText, Link2, Loader2, Pencil, Upload, RefreshCw, Settings2, Trash2, Circle, CheckCircle2, CircleSlash2, XCircle, X, BookOpen, Layers3, Cloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { deletePage, editPage, getDocumentSource, getKbInventory, getPage, getPageLinks, type DocumentSource, type KbInventory, type WikiDocument } from '@/api/wiki'
 import { streamUpload, removeDocument, type AddResult } from '@/api/maintenance'
@@ -407,6 +407,15 @@ export default function KbDetail() {
             room to spare. The reserve lives on this control row (not the header
             div) so the overview cards below keep symmetric px-6 width. */}
         <div className="flex items-center gap-3 pr-28">
+          <button
+            type="button"
+            onClick={() => navigate('/kb')}
+            title={t('common:nav.allKbs')}
+            aria-label={t('common:nav.allKbs')}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
           <span className="w-3 h-3 rounded-full bg-accent-brand" />
           <h1 className="text-[19px] font-extrabold tracking-tight text-foreground">{id}</h1>
           <button
@@ -1049,6 +1058,8 @@ function DocumentsPane({
   const sourceCache = useRef<Map<string, DocumentSource>>(new Map())
   const closeDrawer = useCallback(() => setOpenDoc(null), [])
   const openHash = openDoc?.hash ?? null
+  const openSpace = openDoc?.space ?? null
+  const sourceKey = openHash ? `${openSpace ?? ''}/${openHash}` : null
 
   // Drop cached content when the inventory changes (a recompile can rewrite a
   // document's converted text under the same raw hash), so the next open
@@ -1059,8 +1070,8 @@ function DocumentsPane({
 
   // Fetch the open document's source (per-hash cache; retry via docReloadSeq).
   useEffect(() => {
-    if (!openHash) return
-    const cached = sourceCache.current.get(openHash)
+    if (!openHash || !sourceKey) return
+    const cached = sourceCache.current.get(sourceKey)
     if (cached) {
       setDocSource(cached)
       setDocError(null)
@@ -1071,10 +1082,10 @@ function DocumentsPane({
     setDocLoading(true)
     setDocSource(null)
     setDocError(null)
-    getDocumentSource(kb, openHash)
+    getDocumentSource(kb, openHash, openSpace)
       .then((r) => {
         if (cancelled) return
-        sourceCache.current.set(openHash, r)
+        sourceCache.current.set(sourceKey, r)
         setDocSource(r)
       })
       .catch((e) => {
@@ -1086,15 +1097,18 @@ function DocumentsPane({
     return () => {
       cancelled = true
     }
-  }, [kb, openHash, docReloadSeq])
+  }, [kb, openHash, openSpace, sourceKey, docReloadSeq])
 
   // Parse Markdown once per fetched source (stable cache ref → no re-parse).
-  const readerBody = useMemo(
-    () =>
-      docSource && docSource.content.trim() ? <MarkdownView source={docSource.content} /> : null,
+  const documentMarkdown = useMemo(
+    () => (docSource ? stripFrontmatter(docSource.content) : ''),
     [docSource],
   )
-  const readerEmpty = docSource != null && docSource.content.trim().length === 0
+  const readerBody = useMemo(
+    () => documentMarkdown.trim() ? <MarkdownView source={documentMarkdown} /> : null,
+    [documentMarkdown],
+  )
+  const readerEmpty = docSource != null && documentMarkdown.trim().length === 0
 
   const handleDelete = async (name: string) => {
     setDeletingName(name)
@@ -1226,7 +1240,7 @@ function DocumentsPane({
                 <div className="min-w-0">
                   <div className="text-[13.5px] font-medium text-foreground truncate">{d.name}</div>
                   <div className="text-[12px] text-muted-foreground mt-0.5">
-                    {d.display_type}
+                    {d.source_type === 'confluence' || d.space ? <><Cloud className="inline size-3.5 align-[-2px]" /> {t('kb:docs.confluenceSource')}{d.space ? ` · ${d.space}` : ''}</> : d.display_type}
                     {d.pages != null && <> · {t('kb:docs.pages', { count: d.pages })}</>}
                   </div>
                 </div>
@@ -1238,7 +1252,7 @@ function DocumentsPane({
                     {d.hash.slice(0, 8)}
                   </span>
                 )}
-                {d.name &&
+                {d.name && d.source_type !== 'confluence' && !d.space &&
                   (confirmName === d.name ? (
                     <div className="flex items-center gap-1.5">
                       <span className="text-[11.5px] text-muted-foreground">{t('kb:docs.delete.prompt')}</span>

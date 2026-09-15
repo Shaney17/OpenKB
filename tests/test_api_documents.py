@@ -56,6 +56,32 @@ def test_document_source_short_md(monkeypatch, kb_dir):
     assert payload["name"] == "notes.md"
 
 
+def test_document_source_uses_confluence_page_title(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _write_hashes(
+        kb_dir,
+        {
+            "h-title": {
+                "name": "confluence-site-pm-123.md",
+                "source_title": "Quy trình phê duyệt khoản vay",
+                "doc_name": "confluence-site-pm-123",
+                "type": "md",
+            }
+        },
+    )
+    (kb_dir / "wiki" / "sources" / "confluence-site-pm-123.md").write_text(
+        "# Quy trình", encoding="utf-8"
+    )
+
+    resp = client.post(
+        "/api/v1/document/source", json={"kb": kb, "hash": "h-title"}, headers=_auth()
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Quy trình phê duyệt khoản vay"
+
+
 def test_document_source_long_json_concatenates_pages(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
@@ -186,3 +212,47 @@ def test_document_source_requires_auth(monkeypatch, kb_dir):
     resp = client.post("/api/v1/document/source", json={"kb": "test-kb", "hash": "h1"})
 
     assert resp.status_code == 401
+
+
+def test_project_document_source_reads_full_text_from_selected_space(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    project_file = kb_dir / ".openkb" / "confluence-project.json"
+    project_file.write_text(
+        json.dumps({"spaces": {"PM": {"key": "PM"}, "ENG": {"key": "ENG"}}}),
+        encoding="utf-8",
+    )
+    for space, content in (("pm", "Complete PM page body"), ("eng", "Complete ENG page body")):
+        child = kb_dir / ".openkb" / "spaces" / space
+        (child / ".openkb").mkdir(parents=True)
+        sources = child / "wiki" / "sources"
+        sources.mkdir(parents=True)
+        (child / ".openkb" / "hashes.json").write_text(
+            json.dumps({"same-hash": {"name": "page.md", "doc_name": "page", "type": "md"}}),
+            encoding="utf-8",
+        )
+        (sources / "page.md").write_text(content, encoding="utf-8")
+
+    pm = client.post(
+        "/api/v1/document/source",
+        json={"kb": kb, "hash": "same-hash", "space": "PM"},
+        headers=_auth(),
+    )
+    eng = client.post(
+        "/api/v1/document/source",
+        json={"kb": kb, "hash": "same-hash", "space": "ENG"},
+        headers=_auth(),
+    )
+    assert pm.status_code == eng.status_code == 200
+    assert pm.json()["content"] == "Complete PM page body"
+    assert eng.json()["content"] == "Complete ENG page body"
+    without_space = client.post(
+        "/api/v1/document/source", json={"kb": kb, "hash": "same-hash"}, headers=_auth()
+    )
+    assert without_space.status_code == 404
+    unknown_space = client.post(
+        "/api/v1/document/source",
+        json={"kb": kb, "hash": "same-hash", "space": "NOPE"},
+        headers=_auth(),
+    )
+    assert unknown_space.status_code == 404
