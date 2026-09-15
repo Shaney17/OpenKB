@@ -15,47 +15,7 @@ import KbOverviewCards, { type Section } from '@/components/KbOverviewCards'
 import KbSettingsSheet from '@/components/KbSettingsSheet'
 import { useAnimatedSwitch } from '@/hooks/useAnimatedSwitch'
 import { cn } from '@/lib/utils'
-
-/** True when `line` looks like a line of a YAML frontmatter block: a blank line,
- *  a `#` comment, a `- ` list item, an indented continuation, or a `key: value`
- *  mapping entry whose value is YAML-shaped (empty, quoted, a `[`/`{` flow
- *  collection, or a single bare token). A mapping value that is free prose
- *  (multiple unquoted words, e.g. `see below`) is NOT YAML-shaped — that is what
- *  separates real OKF frontmatter (values are always JSON-quoted) from a prose
- *  line like `Note: see below`. ASCII-only. */
-function looksLikeYamlLine(line: string): boolean {
-  if (line.trim() === '') return true
-  if (/^[ \t]*#/.test(line)) return true // comment
-  if (/^[ \t]*-([ \t]|$)/.test(line)) return true // list item
-  if (/^[ \t]+\S/.test(line)) return true // indented continuation / nested block
-  const m = /^[ \t]*[\w.-]+[ \t]*:([ \t]+(.*))?$/.exec(line)
-  if (!m) return false // no `key:` mapping — a prose line
-  const value = (m[2] ?? '').trim()
-  if (value === '') return true // `key:` with an empty / block value
-  if (/^["'[{]/.test(value)) return true // quoted string or flow collection
-  return !/\s/.test(value) // a single bare scalar (Concept / 42 / true), not prose
-}
-
-/** Strip a leading YAML frontmatter block (`--- ... ---`) from a raw wiki page.
- *  Pages are served verbatim by `GET /api/v1/page`, so an OKF frontmatter block
- *  would otherwise render in the reader as junk metadata lines — and, now that
- *  MarkdownView renders thematic breaks, its `---` delimiters as horizontal
- *  rules. The block is stripped ONLY when it genuinely looks like frontmatter:
- *  it opens at the VERY START of the document, is closed by a line-anchored
- *  `---`, and EVERY non-blank inner line looks like YAML (see `looksLikeYamlLine`).
- *  A block containing a prose line is left intact, so a body that legitimately
- *  opens with a `---` thematic break followed by prose (`---\nIntro paragraph\n---`
- *  or `---\nNote: see below\n---`) is NOT mistaken for frontmatter. Real OKF
- *  frontmatter (`title:`/`type:`/`links:`, values JSON-quoted) still strips.
- *  No-op when there is no leading frontmatter. Only the reader strips it; chat
- *  answers (which carry no frontmatter) go through MarkdownView untouched.
- *  ASCII-only. */
-function stripFrontmatter(md: string): string {
-  const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(md)
-  if (!m) return md
-  if (!m[1].split(/\r?\n/).every(looksLikeYamlLine)) return md
-  return md.slice(m[0].length)
-}
+import { stripFrontmatter } from '@/lib/frontmatter'
 
 /** Per-file lifecycle during a streaming upload. `pending` → `processing`
  *  (backend `file_start`) → terminal `added`/`skipped`/`failed` (`file_done`,

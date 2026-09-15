@@ -5,8 +5,9 @@ import i18n from "@/lib/i18n"
  * A provenance "source" derived from a `tool_call` the agent made during a
  * turn.
  *
- * This is NOT a model-authored citation — the real backend emits no citations.
- * It is the set of wiki artifacts the agent actually *read*, reconstructed from
+ * This is NOT a model-authored citation. Verified original-source quotations
+ * are separate `Citation` records. This is the set of wiki artifacts actually
+ * read, reconstructed from
  * the live SSE `tool_call` stream via an explicit WHITELIST of tool names
  * (never a blacklist): only tools whose provenance we can name are surfaced;
  * every other tool name is ignored (see {@link toolCallSource}).
@@ -32,6 +33,24 @@ export interface Source {
    *  child space (`read_space_page`), so the page opens against that space
    *  rather than the project's own empty wiki. */
   space?: string
+}
+
+/** Agent answers may link `<SPACE>/<section>/<page>` rather than the inventory's
+ * `<section>/<SPACE>/<page>`. Split the former before asking the page API so
+ * even a backend that only supports explicit `{space, path}` can open it. */
+export function wikiLinkSource(target: string): Source {
+  const value = target.trim().replace(/^wiki\//, "")
+  const parts = value.split("/")
+  if (
+    parts.length >= 3 &&
+    ["sources", "concepts", "entities", "summaries", "reports"].includes(parts[1]) &&
+    !["sources", "concepts", "entities", "summaries", "reports"].includes(parts[0])
+  ) {
+    return {
+      kind: "page", label: value, space: parts[0], path: parts.slice(1).join("/"),
+    }
+  }
+  return { kind: "page", label: value, path: value }
 }
 
 /** Backend-verified verbatim text from a wiki/sources/ original document. */

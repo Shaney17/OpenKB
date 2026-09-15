@@ -23,6 +23,7 @@ from openkb.api_models import (
     PageRequest,
     PageResponse,
 )
+from openkb.citations import read_citation_source
 from openkb.page_ops import delete_wiki_page, edit_wiki_page, page_link_context
 from openkb.spaces import is_project, project_index, resolve_page, space_dir
 
@@ -48,6 +49,21 @@ async def page_endpoint(
         if path in ("index", "index.md"):
             return PageResponse(path=path, content=await run_in_threadpool(project_index, kb_dir))
         kb_dir, path = resolve_page(kb_dir, path)
+    # The full ingested text lives under sources/, not in a generated summary.
+    # Short sources are Markdown and long PageIndex sources are page-list JSON;
+    # expose either as readable Markdown instead of appending ".md" to JSON.
+    parts = path.split("/")
+    if len(parts) == 2 and parts[0] == "sources":
+        candidates = [path] if path.endswith((".md", ".json")) else [f"{path}.md", f"{path}.json"]
+        for candidate in candidates:
+            try:
+                source = await run_in_threadpool(read_citation_source, kb_dir, candidate)
+            except FileNotFoundError:
+                continue
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return PageResponse(path=request.path, content=source["content"])
+        raise HTTPException(status_code=404, detail=f"Page not found: {request.path}")
     wiki_dir = (kb_dir / "wiki").resolve()
     rel = path if path.endswith(".md") else f"{path}.md"
     target = (wiki_dir / rel).resolve()

@@ -163,7 +163,10 @@ class TestQueryAgentFederation:
         kb = _plain_kb(tmp_path / "kb")
         agent = build_query_agent(str(kb / "wiki"), "gpt-4o-mini", kb_dir=kb)
         assert {t.name for t in agent.tools} == {
-            "read_file", "get_page_content", "get_image", "quote_source"
+            "read_file",
+            "get_page_content",
+            "get_image",
+            "quote_source",
         }
 
     def test_no_kb_dir_keeps_base_tools(self, tmp_path):
@@ -416,6 +419,18 @@ class TestResolvePage:
     def test_space_qualified_path_routes_to_its_child_kb(self, tmp_path):
         kb = _project_kb(tmp_path / "kb", {"PM": {"concepts/a.md": "x"}})
         child, rel = resolve_page(kb, "concepts/PM/a")
+        assert child == kb / ".openkb" / "spaces" / "pm"
+        assert rel == "concepts/a"
+
+    def test_agent_space_first_source_link_routes_to_its_child_kb(self, tmp_path):
+        kb = _project_kb(tmp_path / "kb", {"PM": {"sources/page.md": "original"}})
+        child, rel = resolve_page(kb, "PM/sources/page")
+        assert child == kb / ".openkb" / "spaces" / "pm"
+        assert rel == "sources/page"
+
+    def test_agent_space_first_compiled_link_routes_to_its_child_kb(self, tmp_path):
+        kb = _project_kb(tmp_path / "kb", {"PM": {"concepts/a.md": "compiled"}})
+        child, rel = resolve_page(kb, "PM/concepts/a")
         assert child == kb / ".openkb" / "spaces" / "pm"
         assert rel == "concepts/a"
 

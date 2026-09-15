@@ -14,11 +14,12 @@ import {
 } from "@/components/ui/sheet"
 import { getGraph, getPage } from "@/api/wiki"
 import { listKbs } from "@/api/kb"
+import { stripFrontmatter } from "@/lib/frontmatter"
 import { runDeckCommand, runSkillCommand } from "@/api/artifacts"
 import type { SseEvent } from "@/api/client"
 import {
   foldSseEvent, initialTurnState, listSessions, loadSession, markToolStepsDone,
-  stepsFromTrace, streamChat, getCitationSource, parseCitations,
+  stepsFromTrace, streamChat, getCitationSource, parseCitations, wikiLinkSource,
   type ChatTurnState, type Source, type Citation,
 } from "@/api/chat"
 
@@ -227,7 +228,7 @@ function AssistantMessage({
                 <div key={`step-${i}`} className="text-[14px]">
                   <MarkdownView
                     source={step.text}
-                    onWikiLink={(target) => onOpen({ kind: "page", label: target, path: target })}
+                    onWikiLink={(target) => onOpen(wikiLinkSource(target))}
                   />
                 </div>
               ) : null
@@ -682,7 +683,12 @@ export default function ChatSession() {
     setPanel({ open: true, path: s.path, content: null, error: null, loading: true })
     try {
       const r = await getPage(kbRef.current, s.path, s.space)
-      setPanel({ open: true, path: s.path, content: r.content, error: null, loading: false })
+      const content = stripFrontmatter(r.content)
+      const title = /^# (.+)$/m.exec(content)?.[1]?.trim()
+      setPanel({
+        open: true, path: s.label, title: s.path.startsWith("sources/") ? title : undefined,
+        content, error: null, loading: false,
+      })
     } catch (e) {
       // A tool_call firing never guaranteed the read succeeded, and there is no
       // tool_result event to confirm it — so a click can 404. Fail gracefully.

@@ -100,8 +100,20 @@ function inline(text: string, onWikiLink?: (target: string) => void): React.Reac
       // past the scheme test (browsers trim & would run it). Same trimmed
       // value is used for href. The label is recursed so `[**x**](url)` works.
       const url = lm ? lm[2].trim() : ''
+      const wikiPath = url.replace(/^\.\//, '').replace(/^wiki\//, '')
+      const isWikiPath = !/^[a-z][a-z0-9+.-]*:/i.test(url) &&
+        /^(?:(?:sources|concepts|entities|summaries|reports)\/[^/]+|[^/]+\/(?:sources|concepts|entities|summaries|reports)\/[^/]+)/.test(wikiPath)
       parts.push(
-        lm && isSafeUrl(url) ? (
+        lm && isSafeUrl(url) && onWikiLink && isWikiPath ? (
+          <button
+            key={k++}
+            type="button"
+            onClick={() => onWikiLink(wikiPath)}
+            className="text-accent-brand hover:underline cursor-pointer"
+          >
+            {inline(label, onWikiLink)}
+          </button>
+        ) : lm && isSafeUrl(url) ? (
           <a
             key={k++}
             href={url}

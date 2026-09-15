@@ -132,9 +132,13 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
                 "history": [],
                 "citations": [
                     {
-                        "id": "q1", "space": "", "path": "sources/overview.md",
-                        "title": "Overview", "quote": "A knowledge base.",
-                        "start": 0, "end": 17,
+                        "id": "q1",
+                        "space": "",
+                        "path": "sources/overview.md",
+                        "title": "Overview",
+                        "quote": "A knowledge base.",
+                        "start": 0,
+                        "end": 17,
                     }
                 ],
             },
@@ -3621,6 +3625,64 @@ def test_page_endpoint_opens_a_space_qualified_path(monkeypatch, kb_dir):
 
     assert response.status_code == 200
     assert response.json()["content"] == "# Order execution"
+
+
+def test_page_endpoint_opens_agent_space_first_source_link(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(
+        kb_dir,
+        "PM",
+        {
+            "sources/confluence-pm-589876.md": (
+                '---\ntitle: "Khớp lệnh"\n---\n\n# Khớp lệnh\n\nNội dung trang gốc.'
+            )
+        },
+    )
+
+    response = client.post(
+        "/api/v1/page",
+        json={"kb": kb, "path": "PM/sources/confluence-pm-589876"},
+        headers=_auth(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "# Khớp lệnh\n\nNội dung trang gốc."
+
+
+def test_page_endpoint_opens_agent_space_first_compiled_link(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _add_space(kb_dir, "PM", {"concepts/order-execution.md": "# Order execution"})
+
+    response = client.post(
+        "/api/v1/page",
+        json={"kb": kb, "path": "PM/concepts/order-execution"},
+        headers=_auth(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "# Order execution"
+
+
+def test_page_endpoint_renders_long_original_source_json(monkeypatch, kb_dir):
+    import json as _json
+
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    (kb_dir / "wiki" / "sources" / "paper.json").write_text(
+        _json.dumps(
+            [{"page": 1, "content": "First page."}, {"page": 2, "content": "Second page."}]
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/v1/page", json={"kb": kb, "path": "sources/paper"}, headers=_auth()
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "First page.\n\n---\n\nSecond page."
 
 
 def test_page_endpoint_serves_a_generated_index_for_a_project(monkeypatch, kb_dir):

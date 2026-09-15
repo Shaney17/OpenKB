@@ -130,9 +130,8 @@ def resolve_page(project_dir: Path, path: str) -> tuple[Path, str]:
     """Map a project-level wiki path to the (child KB, path-within-its-wiki).
 
     Accepts the ``<type>/<SPACE>/<name>`` form that ``project_inventory``
-    produces. Anything else — including a path whose second segment is not a
-    configured space — resolves against the project's own wiki unchanged, so a
-    plain KB and a project's own files behave exactly as before.
+    produces and the ``<SPACE>/<type>/<name>`` form emitted by query agents.
+    Unknown spaces and other paths resolve against the project's own wiki.
     """
     parts = path.split("/")
     if len(parts) >= 3 and parts[0] in _MERGED_SECTIONS:
@@ -141,6 +140,12 @@ def resolve_page(project_dir: Path, path: str) -> tuple[Path, str]:
         except ValueError:
             return project_dir, path
         return child, "/".join([parts[0], *parts[2:]])
+    if len(parts) >= 3 and parts[1] in (*_MERGED_SECTIONS, "sources"):
+        try:
+            child = space_dir(project_dir, parts[0])
+        except ValueError:
+            return project_dir, path
+        return child, "/".join(parts[1:])
     return project_dir, path
 
 
