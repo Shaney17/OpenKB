@@ -17,19 +17,42 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, TypeAlias
 
+from bs4 import BeautifulSoup
 from markdownify import markdownify
 
 from openkb.locks import atomic_write_json, atomic_write_text
 from openkb.state import HashRegistry
 
 _MANIFEST_VERSION = 1
+_CONVERTER_VERSION = 2
 _USER_AGENT = "openkb/confluence-sync"
 
 IngestOutcome: TypeAlias = str | tuple[str, str | None]
+
+
+def _is_default_space_scaffold(webui: str, storage: str) -> bool:
+    """True for Atlassian's untouched space-overview starter template.
+
+    The overview is returned by the pages API, but its stock Edit/Create hints,
+    sample template cards and empty team sections are product onboarding UI,
+    not organization knowledge. A customized overview is retained: skipping
+    requires both the special overview URL and several independent stock-text
+    markers, so a normal page mentioning one phrase is never discarded.
+    """
+    if not webui.rstrip("/").casefold().endswith("/overview"):
+        return False
+    folded = storage.casefold()
+    markers = (
+        "customize your overview",
+        "at the top to create a page in your space",
+        "what's your team's mission?",
+        "type <code>/roadmap</code>",
+        "add team members photo, role",
+    )
+    return sum(marker in folded for marker in markers) >= 3
 
 
 class ConfluenceError(RuntimeError):
@@ -191,6 +214,8 @@ class ConfluenceClient:
             version = raw.get("version") or {}
             page_links = raw.get("_links") or {}
             webui = page_links.get("webui", "") if isinstance(page_links, dict) else ""
+            if _is_default_space_scaffold(str(webui), str(storage_value or "")):
+                continue
             pages.append(
                 ConfluencePage(
                     id=page_id,
@@ -209,120 +234,6 @@ class ConfluenceClient:
         return pages
 
 
-class _StorageToMarkdown(HTMLParser):
-    """Conservative Confluence storage-XHTML to Markdown renderer."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.hrefs: list[str | None] = []
-        self.list_stack: list[str] = []
-        self.in_pre = 0
-        self.skip_depth = 0
-
-    def _newline(self, count: int = 1) -> None:
-        current = "".join(self.parts)
-        needed = count - (len(current) - len(current.rstrip("\n")))
-        if needed > 0:
-            self.parts.append("\n" * needed)
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attr = dict(attrs)
-        tag = tag.lower()
-        if tag in ("script", "style"):
-            self.skip_depth += 1
-            return
-        if self.skip_depth:
-            return
-        if re.fullmatch(r"h[1-6]", tag):
-            self._newline(2)
-            self.parts.append("#" * int(tag[1]) + " ")
-        elif tag in ("p", "div"):
-            self._newline(2)
-        elif tag == "br":
-            self._newline()
-        elif tag in ("strong", "b"):
-            self.parts.append("**")
-        elif tag in ("em", "i"):
-            self.parts.append("*")
-        elif tag == "code" and not self.in_pre:
-            self.parts.append("`")
-        elif tag == "pre":
-            self._newline(2)
-            self.parts.append("```\n")
-            self.in_pre += 1
-        elif tag in ("ul", "ol"):
-            self.list_stack.append(tag)
-            self._newline()
-        elif tag == "li":
-            self._newline()
-            marker = "1. " if self.list_stack and self.list_stack[-1] == "ol" else "- "
-            self.parts.append("  " * max(0, len(self.list_stack) - 1) + marker)
-        elif tag == "blockquote":
-            self._newline(2)
-            self.parts.append("> ")
-        elif tag == "a":
-            self.parts.append("[")
-            self.hrefs.append(attr.get("href"))
-        elif tag == "img":
-            alt = attr.get("alt") or "image"
-            src = attr.get("src") or ""
-            self.parts.append(f"![{alt}]({src})" if src else f"[{alt}]")
-        elif tag == "tr":
-            self._newline()
-        elif tag in ("th", "td"):
-            self.parts.append(" | ")
-        elif tag == "ri:attachment":
-            filename = attr.get("ri:filename") or attr.get("filename")
-            if filename:
-                self.parts.append(f"[Attachment: {filename}]")
-        elif tag == "ri:page":
-            title = attr.get("ri:content-title") or attr.get("content-title")
-            if title:
-                self.parts.append(title)
-
-    def handle_endtag(self, tag: str) -> None:
-        tag = tag.lower()
-        if tag in ("script", "style"):
-            self.skip_depth = max(0, self.skip_depth - 1)
-            return
-        if self.skip_depth:
-            return
-        if re.fullmatch(r"h[1-6]", tag) or tag in ("p", "div", "blockquote"):
-            self._newline(2)
-        elif tag in ("strong", "b"):
-            self.parts.append("**")
-        elif tag in ("em", "i"):
-            self.parts.append("*")
-        elif tag == "code" and not self.in_pre:
-            self.parts.append("`")
-        elif tag == "pre":
-            self.in_pre = max(0, self.in_pre - 1)
-            self._newline()
-            self.parts.append("```\n")
-        elif tag in ("ul", "ol"):
-            if self.list_stack:
-                self.list_stack.pop()
-            self._newline(2)
-        elif tag == "a":
-            href = self.hrefs.pop() if self.hrefs else None
-            self.parts.append(f"]({href})" if href else "]")
-
-    def handle_data(self, data: str) -> None:
-        if self.skip_depth:
-            return
-        if self.in_pre:
-            self.parts.append(data)
-        else:
-            self.parts.append(re.sub(r"\s+", " ", data))
-
-    def markdown(self) -> str:
-        text = "".join(self.parts)
-        text = re.sub(r"[ \t]+\n", "\n", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
-
-
 def storage_to_markdown(storage: str) -> str:
     """Convert Confluence storage XHTML into readable GitHub-style Markdown.
 
@@ -333,44 +244,63 @@ def storage_to_markdown(storage: str) -> str:
     into the document body.
     """
 
-    def attr(tag: str, name: str) -> str:
-        match = re.search(rf'\b(?:\w+:)?{re.escape(name)}=["\']([^"\']*)["\']', tag, re.I)
-        return match.group(1) if match else ""
+    soup = BeautifulSoup(storage, "html.parser")
 
-    prepared = storage
-    prepared = re.sub(
-        r"<ri:page\b[^>]*/?>",
-        lambda match: attr(match.group(0), "content-title"),
-        prepared,
-        flags=re.I,
-    )
-    prepared = re.sub(
-        r"<ri:attachment\b[^>]*/?>",
-        lambda match: (
-            f"[Attachment: {attr(match.group(0), 'filename')}]"
-            if attr(match.group(0), "filename")
-            else ""
-        ),
-        prepared,
-        flags=re.I,
-    )
-    prepared = re.sub(
-        r"<ac:emoticon\b[^>]*/?>",
-        lambda match: attr(match.group(0), "emoji-shortname") or attr(match.group(0), "name"),
-        prepared,
-        flags=re.I,
-    )
-    # Parameters are machine configuration, not page prose. Removing them also
-    # prevents large percent-encoded roadmap payloads from polluting search.
-    prepared = re.sub(r"<ac:parameter\b[^>]*>[\s\S]*?</ac:parameter\s*>", "", prepared, flags=re.I)
-    # Plain-text bodies use CDATA; preserve the label and drop only wrappers.
-    prepared = re.sub(r"<!\[CDATA\[([\s\S]*?)\]\]>", r"\1", prepared)
+    # Smart links are Confluence UI cards. Keep their human label exactly once
+    # instead of leaking both the ri:page title and ac:link-body text.
+    for link in soup.find_all("ac:link"):
+        body = link.find(["ac:link-body", "ac:plain-text-link-body"])
+        page = link.find("ri:page")
+        attachment = link.find("ri:attachment")
+        label = body.get_text(" ", strip=True) if body else ""
+        if not label and page:
+            label = str(page.get("ri:content-title") or "")
+        if not label and attachment:
+            label = str(attachment.get("ri:filename") or "")
+        link.replace_with(label)
+
+    for page in soup.find_all("ri:page"):
+        page.replace_with(str(page.get("ri:content-title") or ""))
+    for attachment in soup.find_all("ri:attachment"):
+        filename = str(attachment.get("ri:filename") or "")
+        attachment.replace_with(f"[Attachment: {filename}]" if filename else "")
+    for emoticon in soup.find_all("ac:emoticon"):
+        emoticon.replace_with(
+            str(emoticon.get("ac:emoji-shortname") or emoticon.get("ac:name") or "")
+        )
+
+    for macro in soup.find_all("ac:structured-macro"):
+        macro_name = str(macro.get("ac:name") or "").casefold()
+        if macro_name == "status":
+            title_parameter = next(
+                (
+                    parameter
+                    for parameter in macro.find_all("ac:parameter")
+                    if str(parameter.get("ac:name") or "").casefold() == "title"
+                ),
+                None,
+            )
+            macro.replace_with(title_parameter.get_text(" ", strip=True) if title_parameter else "")
+            continue
+        rich_body = macro.find("ac:rich-text-body")
+        if rich_body:
+            rich_body.unwrap()
+            macro.unwrap()
+        else:
+            # Roadmap, blog-posts, button and similar macros are interactive UI
+            # widgets. Their parameters are configuration, not searchable prose.
+            macro.decompose()
+
+    for parameter in soup.find_all("ac:parameter"):
+        parameter.decompose()
+    for control in soup.find_all(["button", "input", "select", "textarea", "script", "style"]):
+        control.decompose()
 
     text = markdownify(
-        prepared,
+        str(soup),
         heading_style="ATX",
         bullets="-",
-        strip=["ac:structured-macro", "ac:rich-text-body", "ac:link"],
+        strip=["ac:layout", "ac:layout-section", "ac:layout-cell", "ac:image"],
     )
     # Repair common UTF-8-as-Latin-1 sequences found in legacy Confluence
     # templates without touching correctly decoded Vietnamese/emoji text.
@@ -408,6 +338,7 @@ def render_page(page: ConfluencePage) -> str:
         "parent_id": page.parent_id or "",
         "source_url": page.web_url,
         "title": page.title,
+        "converter_version": _CONVERTER_VERSION,
     }
     frontmatter = "\n".join(
         f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in metadata.items()
@@ -514,7 +445,11 @@ def sync_confluence(
         rendered = render_page(page)
         digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
         previous = entries.get(identity)
-        if previous and previous.get("content_hash") == digest:
+        if (
+            previous
+            and previous.get("content_hash") == digest
+            and previous.get("converter_version") == _CONVERTER_VERSION
+        ):
             doc_name = str(previous.get("doc_name") or "")
             if doc_name:
                 _set_registered_source_title(kb_dir, doc_name, page.title)
@@ -561,6 +496,7 @@ def sync_confluence(
             "page_id": page.id,
             "version": page.version,
             "content_hash": digest,
+            "converter_version": _CONVERTER_VERSION,
             "doc_name": doc_name,
             "title": page.title,
             "source_path": source_path.relative_to(kb_dir).as_posix(),

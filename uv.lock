@@ -1959,6 +1959,7 @@ wheels = [
 name = "openkb"
 source = { editable = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "click" },
     { name = "json-repair" },
     { name = "litellm" },
@@ -1998,6 +1999,7 @@ web = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beautifulsoup4", specifier = "==4.14.3" },
     { name = "click", specifier = "==8.4.0" },
     { name = "fastapi", marker = "extra == 'api'" },
     { name = "fastapi", marker = "extra == 'web'" },

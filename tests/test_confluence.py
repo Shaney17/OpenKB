@@ -95,6 +95,39 @@ def test_client_resolves_numeric_space_id_directly():
     assert urlopen.call_args.args[0].full_url.endswith("/wiki/api/v2/spaces/42")
 
 
+def test_client_excludes_default_space_overview_scaffold():
+    client = ConfluenceClient("https://example.atlassian.net", "dev@example.com", "secret")
+    scaffold = (
+        "<p>Click Edit to customize your overview</p>"
+        "<p>Click Create at the top to create a page in your space</p>"
+        "<p>What's your team's mission?</p>"
+    )
+    regular = "<p>Approved lending policy</p>"
+    raw_pages = [
+        {
+            "id": "home",
+            "title": "Engineering",
+            "body": {"storage": {"value": scaffold}},
+            "version": {"number": 1},
+            "_links": {"webui": "/spaces/ENG/overview"},
+        },
+        {
+            "id": "policy",
+            "title": "Lending policy",
+            "body": {"storage": {"value": regular}},
+            "version": {"number": 1},
+            "_links": {"webui": "/spaces/ENG/pages/policy"},
+        },
+    ]
+    with (
+        patch.object(client, "get_space", return_value={"id": "42", "key": "ENG"}),
+        patch.object(client, "_iter_results", return_value=raw_pages),
+    ):
+        pages = client.get_pages("ENG")
+
+    assert [page.id for page in pages] == ["policy"]
+
+
 def test_storage_to_markdown_preserves_useful_structure():
     storage = (
         "<h2>Decision</h2><p>Use <strong>queues</strong> and "
@@ -129,6 +162,37 @@ def test_storage_to_markdown_formats_nested_lists_tables_and_ignores_macro_param
     assert "| Name | Status |" in rendered
     assert "| Loan | **Active** |" in rendered
     assert "huge-machine-payload" not in rendered
+
+
+def test_storage_to_markdown_keeps_rich_text_but_drops_ui_widgets_and_controls():
+    storage = (
+        '<ac:structured-macro ac:name="panel"><ac:rich-text-body>'
+        "<p>Important policy text</p></ac:rich-text-body></ac:structured-macro>"
+        '<ac:structured-macro ac:name="status">'
+        '<ac:parameter ac:name="title">Approved</ac:parameter>'
+        '<ac:parameter ac:name="colour">Green</ac:parameter></ac:structured-macro>'
+        '<ac:structured-macro ac:name="button">'
+        '<ac:parameter ac:name="label">Edit</ac:parameter></ac:structured-macro>'
+        '<button>Save</button><input value="internal control">'
+    )
+
+    rendered = storage_to_markdown(storage)
+
+    assert "Important policy text" in rendered
+    assert "Approved" in rendered
+    assert "Edit" not in rendered
+    assert "Save" not in rendered
+    assert "internal control" not in rendered
+
+
+def test_storage_to_markdown_deduplicates_confluence_smart_link_label():
+    storage = (
+        '<ac:link ac:card-appearance="inline">'
+        '<ri:page ri:content-title="Risk policy" />'
+        "<ac:link-body>Risk policy</ac:link-body></ac:link>"
+    )
+
+    assert storage_to_markdown(storage) == "Risk policy"
 
 
 def test_storage_to_markdown_repairs_legacy_smart_quote_mojibake():
@@ -166,6 +230,43 @@ def test_sync_is_incremental_and_token_is_never_persisted(tmp_path):
         p.read_text(encoding="utf-8") for p in (tmp_path / ".openkb").rglob("*") if p.is_file()
     )
     assert "secret" not in persisted
+    manifest = json.loads((tmp_path / ".openkb" / "confluence-sync.json").read_text())
+    assert next(iter(manifest["pages"].values()))["converter_version"] == 2
+
+
+def test_sync_reprocesses_documents_created_by_an_older_converter(tmp_path):
+    (tmp_path / ".openkb").mkdir()
+    (tmp_path / ".openkb" / "hashes.json").write_text("{}")
+    ingested = []
+
+    def ingest(path, _kb):
+        ingested.append(path.name)
+        return "added"
+
+    first = sync_confluence(
+        tmp_path,
+        _Client([_page()]),
+        ["ENG"],
+        ingest=ingest,
+        remove=lambda _kb, _doc: {"status": "removed"},
+    )
+    manifest_path = tmp_path / ".openkb" / "confluence-sync.json"
+    manifest = json.loads(manifest_path.read_text())
+    next(iter(manifest["pages"].values())).pop("converter_version")
+    manifest_path.write_text(json.dumps(manifest))
+
+    migrated = sync_confluence(
+        tmp_path,
+        _Client([_page()]),
+        ["ENG"],
+        ingest=ingest,
+        remove=lambda _kb, _doc: {"status": "removed"},
+    )
+
+    assert first.added == 1
+    assert migrated.updated == 1
+    assert migrated.unchanged == 0
+    assert len(ingested) == 2
 
 
 def test_sync_persists_page_title_for_document_display(tmp_path):
