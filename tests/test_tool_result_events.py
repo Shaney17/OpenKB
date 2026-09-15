@@ -9,6 +9,7 @@ identical to a read that delivered content.
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +30,7 @@ class TestIsToolFailure:
             "Could not read /tmp/x: boom",
             "Unknown skill: 'nope'. Call list_skills() to see available skills.",
             "Unknown space: Space 'NOPE' is not assigned to this project",
+            "Citation rejected: Quote is not present verbatim in the original document.",
         ],
     )
     def test_in_band_failures_are_detected(self, output):
@@ -98,6 +100,35 @@ async def _events(monkeypatch, *items):
 
 
 class TestToolResultEvent:
+    @pytest.mark.asyncio
+    async def test_only_verified_quote_outputs_reach_final_citations(self, monkeypatch):
+        valid = {
+            "id": "quote1",
+            "space": "PM",
+            "path": "sources/loan.md",
+            "title": "Loan",
+            "quote": "The approved loan policy.",
+            "start": 4,
+            "end": 29,
+        }
+        second = {
+            **valid,
+            "id": "quote2",
+            "path": "sources/risk.md",
+            "title": "Risk",
+        }
+        events = await _events(
+            monkeypatch,
+            _call("quote_source", "{}", "c1"),
+            _output("c1", json.dumps(valid)),
+            _call("quote_source", "{}", "c3"),
+            _output("c3", json.dumps(second)),
+            _call("quote_source", "{}", "c2"),
+            _output("c2", "Citation rejected: invented quote"),
+        )
+        final = events[-1]
+        assert final["data"]["citations"] == [valid, second]
+
     @pytest.mark.asyncio
     async def test_successful_read_reports_ok(self, monkeypatch):
         events = await _events(

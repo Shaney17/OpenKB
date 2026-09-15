@@ -18,8 +18,8 @@ import { runDeckCommand, runSkillCommand } from "@/api/artifacts"
 import type { SseEvent } from "@/api/client"
 import {
   foldSseEvent, initialTurnState, listSessions, loadSession, markToolStepsDone,
-  stepsFromTrace, streamChat,
-  type ChatTurnState, type Source,
+  stepsFromTrace, streamChat, getCitationSource, parseCitations,
+  type ChatTurnState, type Source, type Citation,
 } from "@/api/chat"
 
 let seq = 100
@@ -101,6 +101,8 @@ interface PanelState {
   content: string | null
   error: string | null
   loading: boolean
+  title?: string
+  highlight?: { start: number; end: number }
 }
 
 const CLOSED_PANEL: PanelState = { open: false, path: "", content: null, error: null, loading: false }
@@ -190,10 +192,12 @@ function ToolStep({
 function AssistantMessage({
   turn,
   onOpen,
+  onOpenCitation,
   onOpenArtifact,
 }: {
   turn: ChatTurnState
   onOpen: (s: Source) => void
+  onOpenCitation: (c: Citation) => void
   onOpenArtifact: (a: Artifact) => void
 }) {
   const { t } = useTranslation("chat")
@@ -234,6 +238,31 @@ function AssistantMessage({
             ),
           )}
         </div>
+
+        {turn.citations.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("chat:citations.heading")}
+            </p>
+            {turn.citations.map((citation) => (
+              <button
+                key={citation.id}
+                type="button"
+                onClick={() => onOpenCitation(citation)}
+                className="w-full rounded-xl border border-[hsl(var(--glass-border))] glass-2 p-3 text-left hover:border-accent-brand/40 transition"
+                title={t("chat:citations.open")}
+              >
+                <span className="flex items-center gap-2 text-[12px] font-medium text-foreground">
+                  <FileText className="h-3.5 w-3.5 text-accent-brand" />
+                  {citation.title}{citation.space ? ` · ${citation.space}` : ""}
+                </span>
+                <span className="mt-2 block border-l-2 border-accent-brand/50 pl-3 text-[13px] leading-relaxed text-muted-foreground">
+                  “{citation.quote}”
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 错误 */}
         {turn.error && (
@@ -312,6 +341,12 @@ export default function ChatSession() {
   // Stop button gates on this so it never appears as a visible no-op.
   const [stoppable, setStoppable] = useState(false)
   const [panel, setPanel] = useState<PanelState>(CLOSED_PANEL)
+  const quoteRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (panel.open && panel.highlight && panel.content !== null) {
+      quoteRef.current?.scrollIntoView({ block: "center" })
+    }
+  }, [panel.open, panel.highlight, panel.content])
 
   // AbortController for the in-flight chat/query stream — one per turn. The Stop
   // button and the unmount cleanup both abort via this ref; runTurn passes its
@@ -591,6 +626,7 @@ export default function ChatSession() {
                 ...initialTurnState(),
                 answer: text,
                 steps,
+                citations: parseCitations(loaded.assistant_citations?.[i]),
                 done: true,
                 sessionId: id,
               },
@@ -656,6 +692,19 @@ export default function ChatSession() {
     }
   }
 
+  const openCitation = async (citation: Citation) => {
+    setPanel({ open: true, path: citation.path, title: citation.title, content: null, error: null, loading: true })
+    try {
+      const source = await getCitationSource(kbRef.current, citation)
+      setPanel({
+        open: true, path: citation.path, title: source.title, content: source.content,
+        highlight: { start: source.start, end: source.end }, error: null, loading: false,
+      })
+    } catch (e) {
+      setPanel((p) => ({ ...p, loading: false, error: errMsg(e) }))
+    }
+  }
+
   const send = (text: string, command: SlashCommand | null) => {
     // A selected command may carry no text (e.g. `/visualize` takes no args).
     if (running || !kbRef.current || (!text.trim() && !command)) return
@@ -706,6 +755,7 @@ export default function ChatSession() {
                 key={m.id}
                 turn={m.turn}
                 onOpen={openSource}
+                onOpenCitation={openCitation}
                 onOpenArtifact={setPanelArtifact}
               />
             ),
@@ -745,7 +795,7 @@ export default function ChatSession() {
       <Sheet open={panel.open} onOpenChange={(o) => setPanel((p) => ({ ...p, open: o }))}>
         <SheetContent side="right" className="w-full sm:max-w-[560px] overflow-y-auto">
           <SheetHeader>
-            <SheetTitle className="font-mono2 text-[13px] text-muted-foreground break-all">wiki/{panel.path}</SheetTitle>
+            <SheetTitle className="text-[14px] break-words">{panel.title || `wiki/${panel.path}`}</SheetTitle>
           </SheetHeader>
           <div className="px-4 pb-8">
             {panel.loading && (
@@ -758,7 +808,15 @@ export default function ChatSession() {
                 {t("common:pageLoadError", { error: panel.error })}
               </div>
             )}
-            {panel.content !== null && <MarkdownView source={panel.content} />}
+            {panel.content !== null && (panel.highlight ? (
+              <div className="whitespace-pre-wrap break-words font-mono2 text-[13px] leading-relaxed text-foreground">
+                {panel.content.slice(0, panel.highlight.start)}
+                <mark ref={quoteRef} className="rounded bg-yellow-200 px-0.5 text-slate-900 dark:bg-yellow-400/70">
+                  {panel.content.slice(panel.highlight.start, panel.highlight.end)}
+                </mark>
+                {panel.content.slice(panel.highlight.end)}
+              </div>
+            ) : <MarkdownView source={panel.content} />)}
           </div>
         </SheetContent>
       </Sheet>

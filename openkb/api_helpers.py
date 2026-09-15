@@ -454,10 +454,8 @@ async def _stream_query(
         ):
             data = event["data"]
             if event["event"] == "final":
-                # Persist the fully-computed answer *before* checking for a
-                # disconnect: the caller asked to save it, so a client that
-                # drops at the last moment must not lose the write. Only the
-                # client-facing SSE frame is skipped when disconnected.
+                # Persist before disconnect checks so a last-moment drop does
+                # not lose a requested save; skip only the client SSE frame.
                 final_answer = data["answer"]
                 saved_path = (
                     _save_query_answer(kb_dir, request.question, final_answer)
@@ -472,6 +470,7 @@ async def _stream_query(
                     {
                         "answer": final_answer,
                         "saved_path": str(saved_path) if saved_path else None,
+                        "citations": data.get("citations", []),
                     },
                 )
             else:

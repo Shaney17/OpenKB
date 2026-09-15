@@ -159,15 +159,17 @@ class TestReadSpacePage:
 
 
 class TestQueryAgentFederation:
-    def test_plain_kb_keeps_the_three_base_tools(self, tmp_path):
+    def test_plain_kb_has_original_quote_tool_without_federated_tools(self, tmp_path):
         kb = _plain_kb(tmp_path / "kb")
         agent = build_query_agent(str(kb / "wiki"), "gpt-4o-mini", kb_dir=kb)
-        assert {t.name for t in agent.tools} == {"read_file", "get_page_content", "get_image"}
+        assert {t.name for t in agent.tools} == {
+            "read_file", "get_page_content", "get_image", "quote_source"
+        }
 
-    def test_no_kb_dir_keeps_the_three_base_tools(self, tmp_path):
+    def test_no_kb_dir_keeps_base_tools(self, tmp_path):
         """The kwarg is optional — callers that don't pass it are unaffected."""
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")
-        assert len(agent.tools) == 3
+        assert len(agent.tools) == 4
 
     def test_project_kb_gains_the_federated_tools(self, tmp_path):
         kb = _project_kb(tmp_path / "kb", {"PM": {"a.md": "x"}})

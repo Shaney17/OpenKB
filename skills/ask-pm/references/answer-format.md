@@ -12,7 +12,7 @@ Kết luận trước trong 1–2 câu, kèm mức chắc chắn khi chưa VERIF
 
 Giải thích bản chất, điều kiện áp dụng, ngoại lệ được tài liệu ghi, dữ liệu còn thiếu và bước tiếp theo. Với luồng nhiều nhánh, dùng danh sách bước và bảng “Nếu… thì…”. Với phép tính, ghi rõ công thức có nguồn, đầu vào, đơn vị, phép thế từng bước và làm tròn trung gian.
 
-Bảng Nguồn là bắt buộc khi có khẳng định nghiệp vụ:
+Bảng Nguồn là bắt buộc khi có khẳng định nghiệp vụ. Các wikilink đến trang compile chỉ để điều hướng nội bộ, không phải citation; citation là thẻ quote_source đã xác minh từ tài liệu gốc hiển thị dưới câu trả lời:
 
 | Trang OpenKB | Vai trò | Tài liệu gốc |
 |---|---|---|

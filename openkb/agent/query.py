@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -15,6 +16,7 @@ from openkb.agent.tools import (
     read_wiki_image,
     write_kb_file,
 )
+from openkb.citations import verify_source_quote
 from openkb.config import LlmCredentialBundle, normalize_litellm_model, resolve_model_settings
 from openkb.schema import get_agents_md
 from openkb.spaces import configured_spaces, is_project
@@ -48,9 +50,17 @@ You are OpenKB, a knowledge-base Q&A agent. You answer questions by searching th
    wiki/sources/); long-doc JSON page metadata lists them wiki-root-relative
    (e.g. sources/images/doc/file.png). Pass either form as seen to the
    get_image tool — it accepts both.
-7. Synthesize a clear, concise, well-cited answer grounded in wiki content.
+7. For every claim you cite, read the ORIGINAL document in sources/ and call
+   `quote_source(path, quote)` with a short sentence copied verbatim from it.
+   A summary, concept, entity or index is NEVER a citation source. The tool
+   rejects invented or paraphrased quotes. Cite every relevant original
+   document, even when several documents support one answer. Then synthesize
+   a clear answer grounded in those verified quotations.
 
 Answer based only on wiki content. Be concise.
+Do not present a factual answer as sourced unless at least one quote_source call
+succeeds. If only derived pages are available, say the original cannot be
+verified; never substitute a generated summary for an original quotation.
 Before each tool call, output one short sentence explaining the reason.
 
 If you cannot find relevant information, say so clearly.
@@ -77,7 +87,9 @@ Override the search strategy above with this one:
    summary. Follow `[[wikilinks]]` in the SAME space.
 3. Use `list_spaces()` when you need to know which spaces exist, or when a
    search comes back empty across the board.
-4. Cite pages as `<SPACE>/<path>` so the user can find them again.
+4. For each claim, call `quote_source(path, quote, space)` using a source hit
+   under `sources/` in that space. Never cite a compiled page. Include all
+   distinct original documents supporting the answer.
 
 Never tell the user this knowledge base is empty because index.md is empty —
 that file is empty in every project. Search the spaces first.
@@ -146,6 +158,25 @@ def build_query_agent(
             return ToolOutputImage(image_url=result["image_url"])
         return ToolOutputText(text=result["text"])
 
+    @function_tool
+    def quote_source(path: str, quote: str, space: str = "") -> str:
+        """Verify a verbatim quotation in an ORIGINAL document, not a summary.
+
+        Call once for each relevant source document after reading its content.
+        A rejected quote must be corrected before claiming it as evidence.
+
+        Args:
+            path: Wiki-relative original source path, e.g. sources/page.md.
+            quote: An exact 12–1500 character substring copied from that source.
+            space: Project space key when the source belongs to a child space.
+        """
+        try:
+            root = kb_dir if kb_dir is not None else Path(wiki_root).parent
+            citation = verify_source_quote(root, path, quote, space)
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            return f"Citation rejected: {exc}"
+        return json.dumps(citation, ensure_ascii=False)
+
     from agents.model_settings import ModelSettings
 
     if bundle is not None:
@@ -163,7 +194,7 @@ def build_query_agent(
     return Agent(
         name="wiki-query",
         instructions=instructions,
-        tools=[read_file, get_page_content, get_image, *space_tools],
+        tools=[read_file, get_page_content, get_image, quote_source, *space_tools],
         model=f"litellm/{model}",
         model_settings=ModelSettings(**model_settings),
     )
@@ -324,6 +355,7 @@ async def iter_agent_response_events(
     )
     collected: list[str] = []
     pending_calls: dict[str, tuple[str, str]] = {}
+    citations: dict[str, dict[str, Any]] = {}
 
     async for event in result.stream_events():
         if isinstance(event, RawResponsesStreamEvent):
@@ -358,6 +390,13 @@ async def iter_agent_response_events(
                             "ok": not is_tool_failure(output),
                         },
                     }
+                if name == "quote_source":
+                    try:
+                        citation = json.loads(output)
+                    except json.JSONDecodeError:
+                        citation = None
+                    if isinstance(citation, dict) and isinstance(citation.get("id"), str):
+                        citations[citation["id"]] = citation
                 payload = artifact_event_from_write(name, arguments, output)
                 if payload is not None:
                     yield {"event": "artifact", "data": payload}
@@ -369,6 +408,7 @@ async def iter_agent_response_events(
         "event": "final",
         "data": {
             "answer": answer,
+            "citations": list(citations.values()),
             "history": result.to_input_list(),
         },
     }

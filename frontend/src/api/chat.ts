@@ -34,6 +34,50 @@ export interface Source {
   space?: string
 }
 
+/** Backend-verified verbatim text from a wiki/sources/ original document. */
+export interface Citation {
+  id: string
+  space: string
+  path: string
+  title: string
+  quote: string
+  start: number
+  end: number
+}
+
+export interface CitationSource {
+  title: string
+  content: string
+  start: number
+  end: number
+}
+
+export function getCitationSource(kb: string, citation: Citation): Promise<CitationSource> {
+  return apiFetch<CitationSource>("/api/v1/citation/source", {
+    body: { kb, path: citation.path, quote: citation.quote, space: citation.space },
+  })
+}
+
+export function parseCitations(value: unknown): Citation[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const citations: Citation[] = []
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue
+    const c = item as Partial<Citation>
+    if (
+      typeof c.id !== "string" || typeof c.path !== "string" ||
+      !/^sources\/[^/]+\.(md|json)$/.test(c.path) || typeof c.quote !== "string" ||
+      typeof c.title !== "string" || typeof c.space !== "string" ||
+      typeof c.start !== "number" || typeof c.end !== "number" ||
+      seen.has(c.id)
+    ) continue
+    seen.add(c.id)
+    citations.push(c as Citation)
+  }
+  return citations
+}
+
 /**
  * One item in a turn's ORDERED, interleaved trace, preserving SSE arrival
  * order: a chunk of the model's narration/answer text, or one tool read.
@@ -69,6 +113,7 @@ export interface ChatTurnState {
   steps: TurnStep[]
   /** Whitelisted, per-turn-deduped provenance, in first-seen order. */
   sources: Source[]
+  citations: Citation[]
   /** Most recent in-progress read, for a live "reading X…" indicator; null once
    *  the turn is idle or finished. */
   reading: Source | null
@@ -96,6 +141,7 @@ export function initialTurnState(): ChatTurnState {
     answer: "",
     steps: [],
     sources: [],
+    citations: [],
     reading: null,
     sessionId: null,
     savedPath: null,
@@ -359,6 +405,7 @@ export function foldSseEvent(state: ChatTurnState, event: SseEvent, kb: string):
         answer,
         steps,
         sources: histSources ?? state.sources,
+        citations: parseCitations(data.citations),
         reading: null,
         sessionId:
           typeof data.session_id === "string" ? data.session_id : state.sessionId,
@@ -479,6 +526,7 @@ export interface ChatSessionLoad {
    *  for this turn — fall back to the flat assistant_texts entry". Absent from a
    *  backend too old to send it. */
   assistant_traces?: PersistedTraceStep[][]
+  assistant_citations?: Citation[][]
 }
 
 /** Load one session's turns for restore-on-reload (`/api/v1/chat/sessions/load`).

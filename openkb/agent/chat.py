@@ -1001,13 +1001,17 @@ async def iter_chat_turn_events(
         # the answer; require a text step with non-whitespace content instead.
         if answer and not any(s.get("kind") == "text" and s.get("text", "").strip() for s in trace):
             trace.append({"kind": "text", "text": answer})
-        session.record_turn(user_input, answer, data["history"], trace=trace)
+        citations = data.get("citations", [])
+        session.record_turn(
+            user_input, answer, data["history"], trace=trace, citations=citations
+        )
         yield {
             "event": "final",
             "data": {
                 "answer": answer,
                 "session_id": session.id,
                 "turn_count": session.turn_count,
+                "citations": citations,
             },
         }
 

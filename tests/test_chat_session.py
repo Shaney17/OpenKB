@@ -99,6 +99,24 @@ def test_record_turn_persists_and_roundtrips_trace(tmp_path):
     assert loaded.assistant_traces == [trace]
 
 
+def test_citations_roundtrip_with_each_assistant_turn(tmp_path):
+    session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
+    citation = {
+        "id": "q1",
+        "space": "PM",
+        "path": "sources/loan.md",
+        "title": "Loan",
+        "quote": "The loan has been approved.",
+        "start": 1,
+        "end": 28,
+    }
+    session.record_turn("first", "answer", [], citations=[citation])
+    session.record_turn("second", "answer 2", [])
+
+    loaded = load_session(tmp_path, session.id)
+    assert loaded.assistant_citations == [[citation], []]
+
+
 def test_record_turn_without_trace_stores_empty_list(tmp_path):
     session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
     session.record_turn("q", "a", [])
@@ -147,6 +165,32 @@ def _fake_event_stream(events: list[dict[str, Any]]):
             yield event
 
     return _stream
+
+
+@pytest.mark.asyncio
+async def test_chat_final_persists_verified_citations(tmp_path, monkeypatch):
+    session = ChatSession.new(tmp_path, "gpt-4o-mini", "en")
+    citation = {
+        "id": "q1",
+        "space": "PM",
+        "path": "sources/loan.md",
+        "title": "Loan",
+        "quote": "The loan has been approved.",
+        "start": 1,
+        "end": 28,
+    }
+    events = [
+        {
+            "event": "final",
+            "data": {"answer": "Approved.", "history": [], "citations": [citation]},
+        }
+    ]
+    monkeypatch.setattr(chat_mod, "iter_agent_response_events", _fake_event_stream(events))
+
+    final = [event async for event in iter_chat_turn_events(object(), session, "q")][-1]
+
+    assert final["data"]["citations"] == [citation]
+    assert load_session(tmp_path, session.id).assistant_citations == [[citation]]
 
 
 @pytest.mark.asyncio

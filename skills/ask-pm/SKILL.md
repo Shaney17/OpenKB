@@ -20,7 +20,7 @@ Dù ở chế độ nào, chỉ gọi VERIFIED khi nội dung đã đọc đầy
 
 1. Xác định KB đang mở. Với project chứa nhiều space, gọi list_spaces nếu cần biết phạm vi; tìm bằng search_spaces(query, spaces_filter) trên các space được người dùng chỉ định, nếu không thì trên toàn project. Với KB thường, đọc read_file("index.md"), rồi theo các trang liên quan.
 2. Chuẩn hóa câu hỏi thành thuật ngữ nghiệp vụ, loại PII khỏi tham số tool. Thử cách diễn đạt khác hoặc tiếng Anh nếu trang trộn ngôn ngữ.
-3. Đọc toàn văn trang có triển vọng: read_space_page(space, path) cho project, read_file(path) cho KB thường. Excerpt tìm kiếm chỉ giúp chọn trang. Ưu tiên concepts/entities để hiểu cơ chế; dùng summaries để định vị tài liệu gốc. Khi cần xác minh một dữ kiện hoặc trích dẫn, đọc trang sources/ tương ứng trong cùng space ở cả hai chế độ; source là toàn văn tài liệu nhập, không chỉ là summary.
+3. Đọc toàn văn trang có triển vọng: read_space_page(space, path) cho project, read_file(path) cho KB thường. Excerpt tìm kiếm chỉ giúp chọn trang. Ưu tiên concepts/entities để hiểu cơ chế; dùng summaries để định vị tài liệu gốc. Khi cần trích dẫn, đọc trang sources/ tương ứng và gọi quote_source(path, quote, space) với câu nguyên văn. Với KB thường để space rỗng. Chỉ quote_source được backend xác nhận mới là citation; không dùng index/concept/entity/summary làm nguồn quote.
 4. Theo wikilink và frontmatter sources/full_text trong cùng space để kiểm tra ngữ cảnh, ngoại lệ, ngày hiệu lực nếu tài liệu thực sự ghi. Không dùng get_page_content trên project để đọc tài liệu của child space vì tool đó trỏ vào wiki của project.
 5. Kết luận một status: VERIFIED, NEED_MORE_INPUT, KNOWLEDGE_GAP, CONFLICT hoặc PM_REVIEW_REQUIRED. Thiếu đầu vào để tính là NEED_MORE_INPUT, không phải thiếu tri thức. Xem tiêu chí trong references/retrieval.md.
 
@@ -50,7 +50,7 @@ Yêu cầu khiếu nại, ưu đãi hoặc chính sách mới ngoài tài liệu
 
 Đừng đưa tên API, field kỹ thuật, link Confluence, tên space hay wikilink vào Phần 2. Không tự nhận hệ thống sai, không bịa số, thời hạn hay chính sách. Với số tự tính, nêu công thức từ wiki, phép thế từng bước, đơn vị và cảnh báo cần đối chiếu.
 
-Trước khi xuất, kiểm tra mọi khẳng định có trang compile đọc toàn văn chống lưng; dữ kiện hoặc trích dẫn cụ thể đã được đối chiếu với source tương ứng khi cần; điều kiện áp dụng đúng bối cảnh; các nguồn thật sự tồn tại; không diễn giải ngày sửa tài liệu thành ngày hiệu lực; và Phần 2 không vượt quá bằng chứng.
+Trước khi xuất, kiểm tra mọi khẳng định có trang compile đọc toàn văn chống lưng; mọi trích dẫn đã được quote_source xác nhận từ tài liệu gốc (nếu nhiều tài liệu thì gọi cho từng tài liệu); điều kiện áp dụng đúng bối cảnh; các nguồn thật sự tồn tại; không diễn giải ngày sửa tài liệu thành ngày hiệu lực; và Phần 2 không vượt quá bằng chứng.
 
 ## Tài liệu tham chiếu
 

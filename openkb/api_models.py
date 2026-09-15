@@ -68,6 +68,21 @@ class ChatSessionLoadResponse(BaseModel):
     # Parallel to assistant_texts (1:1 by index); an empty inner list means
     # "no trace for this turn — render the flat assistant_texts entry instead".
     assistant_traces: list[list[ChatTraceStep]] = Field(default_factory=list)
+    assistant_citations: list[list[dict[str, Any]]] = Field(default_factory=list)
+
+
+class CitationSourceRequest(BaseModel):
+    kb: str = Field(..., min_length=1)
+    path: str = Field(..., min_length=1)
+    quote: str = Field(..., min_length=12, max_length=1500)
+    space: str = ""
+
+
+class CitationSourceResponse(BaseModel):
+    title: str
+    content: str
+    start: int
+    end: int
 
 
 class ChatSessionLoadRequest(BaseModel):

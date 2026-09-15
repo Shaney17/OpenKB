@@ -6,6 +6,10 @@
     "buildingGraph": "构建概念图谱…"
   },
   "artifact": { "failed": "生成失败" },
+  "citations": {
+    "heading": "已核实引文 · 原始文档",
+    "open": "打开原始文档并定位到高亮引文"
+  },
   "sources": {
     "heading": "参考来源",
     "pageTip": "点击查看该 wiki 页面",

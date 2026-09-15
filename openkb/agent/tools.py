@@ -29,6 +29,7 @@ TOOL_FAILURE_PREFIXES = (
     "Could not read ",
     "Unknown skill:",
     "Unknown space:",
+    "Citation rejected:",
 )
 
 

@@ -125,7 +125,20 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
         assert question == "What is OpenKB?"
         yield {"event": "delta", "data": {"text": "A knowledge"}}
         yield {"event": "delta", "data": {"text": " base."}}
-        yield {"event": "final", "data": {"answer": "A knowledge base.", "history": []}}
+        yield {
+            "event": "final",
+            "data": {
+                "answer": "A knowledge base.",
+                "history": [],
+                "citations": [
+                    {
+                        "id": "q1", "space": "", "path": "sources/overview.md",
+                        "title": "Overview", "quote": "A knowledge base.",
+                        "start": 0, "end": 17,
+                    }
+                ],
+            },
+        }
 
     monkeypatch.setattr("openkb.api_helpers.build_query_agent", lambda *args, **kwargs: object())
     monkeypatch.setattr("openkb.api_helpers.iter_agent_response_events", fake_events)
@@ -141,6 +154,7 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
     events = _events_from_sse(response.text)
     assert [event["event"] for event in events] == ["start", "delta", "delta", "final", "done"]
     assert events[-2]["data"]["answer"] == "A knowledge base."
+    assert events[-2]["data"]["citations"][0]["path"] == "sources/overview.md"
 
 
 def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):

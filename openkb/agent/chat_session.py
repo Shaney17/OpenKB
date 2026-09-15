@@ -120,6 +120,7 @@ class ChatSession:
     # assistant_texts. Empty for turns saved before this existed (and for
     # CLI-recorded turns): the frontend falls back to the flat text for those.
     assistant_traces: list[list[dict[str, Any]]]
+    assistant_citations: list[list[dict[str, Any]]]
     path: Path
 
     @classmethod
@@ -138,6 +139,7 @@ class ChatSession:
             user_turns=[],
             assistant_texts=[],
             assistant_traces=[],
+            assistant_citations=[],
             path=chats_dir(kb_dir) / f"{sid}.json",
         )
 
@@ -154,6 +156,7 @@ class ChatSession:
             "user_turns": self.user_turns,
             "assistant_texts": self.assistant_texts,
             "assistant_traces": self.assistant_traces,
+            "assistant_citations": self.assistant_citations,
         }
 
     def save(self) -> None:
@@ -171,6 +174,7 @@ class ChatSession:
         assistant_text: str,
         new_history: list[dict[str, Any]],
         trace: list[dict[str, Any]] | None = None,
+        citations: list[dict[str, Any]] | None = None,
     ) -> None:
         self.history = sanitize_history(new_history)
         self.user_turns.append(user_message)
@@ -183,6 +187,9 @@ class ChatSession:
         while len(self.assistant_traces) < len(self.assistant_texts) - 1:
             self.assistant_traces.append([])
         self.assistant_traces.append(trace or [])
+        while len(self.assistant_citations) < len(self.assistant_texts) - 1:
+            self.assistant_citations.append([])
+        self.assistant_citations.append(citations or [])
         self.turn_count = len(self.user_turns)
         if not self.title:
             self.title = _title_from(user_message)
@@ -205,6 +212,7 @@ def load_session(kb_dir: Path, session_id: str) -> ChatSession:
         user_turns=data.get("user_turns", []),
         assistant_texts=data.get("assistant_texts", []),
         assistant_traces=data.get("assistant_traces", []),
+        assistant_citations=data.get("assistant_citations", []),
         path=path,
     )
 

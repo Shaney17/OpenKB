@@ -6,6 +6,10 @@
     "buildingGraph": "Building the concept graph…"
   },
   "artifact": { "failed": "Generation failed" },
+  "citations": {
+    "heading": "Verified quotes · original documents",
+    "open": "Open the original document at this highlighted quote"
+  },
   "sources": {
     "heading": "Sources",
     "pageTip": "Click to view this wiki page",

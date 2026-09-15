@@ -20,7 +20,6 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
-    Response,
     UploadFile,
     status,
 )
@@ -30,13 +29,13 @@ from starlette.concurrency import run_in_threadpool
 from openkb.agent.chat import build_chat_session_agent, iter_chat_turn_events
 from openkb.agent.chat_session import delete_session, list_sessions, load_session
 from openkb.agent.query import build_run_config_from_bundle, run_query
+from openkb.api_citations_router import citations_router
 from openkb.api_config import apply_kb_config_patch, read_kb_config
 from openkb.api_config_router import config_router
 from openkb.api_confluence_router import confluence_router
 from openkb.api_documents_router import documents_router
 from openkb.api_graph import graph_router
 from openkb.api_helpers import (
-    UI_SESSION_COOKIE,
     _configure_cors,
     _init_kb_for_api,
     _iter_deck,
@@ -56,7 +55,6 @@ from openkb.api_helpers import (
     _stream_remove,
     _stream_skill,
     _stream_watch_events,
-    _ui_session_value,
     _write_add_uploads,
     require_bearer_token,
 )
@@ -101,6 +99,7 @@ from openkb.api_models import (
 )
 from openkb.api_output import output_router
 from openkb.api_pages_router import pages_router
+from openkb.api_ui_router import ui_router
 from openkb.cli import get_kb_status, iter_recompile, run_lint_report, run_remove_for_api
 from openkb.config import (
     DEFAULT_CONFIG,
@@ -124,9 +123,7 @@ def create_app() -> FastAPI:
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
     litellm.suppress_debug_info = True
     load_dotenv()
-
     registry = WatchRegistry()
-
     # Per-KB asyncio locks for async mutation endpoints (lint/recompile).
     # kb_ingest_lock tracks reentrancy in threading.local, but the event loop
     # runs all requests on one thread, so concurrent same-KB mutations are
@@ -161,7 +158,6 @@ def create_app() -> FastAPI:
             registry.stop_all()
 
     app = FastAPI(title="OpenKB API", lifespan=lifespan)
-
     _configure_cors(app)
     app.include_router(graph_router)
     app.include_router(output_router)
@@ -169,23 +165,10 @@ def create_app() -> FastAPI:
     app.include_router(kbs_router)
     app.include_router(pages_router)
     app.include_router(documents_router)
+    app.include_router(citations_router)
     app.include_router(confluence_router)
     app.include_router(mcp_router)
-
-    @app.post("/api/v1/ui/session", status_code=status.HTTP_204_NO_CONTENT)
-    async def ui_session_endpoint(request: Request, response: Response) -> None:
-        """Bootstrap the same-origin web UI without exposing the API token."""
-        api_token = os.environ.get("OPENKB_API_TOKEN")
-        if api_token:
-            response.set_cookie(
-                UI_SESSION_COOKIE,
-                _ui_session_value(api_token),
-                httponly=True,
-                secure=request.url.scheme == "https",
-                samesite="strict",
-                max_age=24 * 60 * 60,
-                path="/",
-            )
+    app.include_router(ui_router)
 
     @app.get("/api/v1/kbs", response_model=KbListResponse)
     async def list_kbs_endpoint(
@@ -403,6 +386,7 @@ def create_app() -> FastAPI:
             user_turns=session.user_turns,
             assistant_texts=session.assistant_texts,
             assistant_traces=session.assistant_traces,
+            assistant_citations=session.assistant_citations,
         )
 
     @app.post("/api/v1/chat/sessions/delete", response_model=ChatSessionDeleteResponse)
