@@ -79,6 +79,7 @@ from openkb.indexer import (
 from openkb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock, kb_read_lock
 from openkb.log import append_log
 from openkb.mutation import publish_staged_tree
+from openkb.frontmatter import parse as parse_frontmatter
 from openkb.schema import AGENTS_MD, INDEX_SEED, PAGE_CONTENT_DIRS
 
 # Suppress warnings after all imports — markitdown overrides filters at import time
@@ -3785,10 +3786,24 @@ def get_kb_list(kb_dir: Path) -> dict[str, Any]:
         raw_type = meta.get("type", "unknown")
         pages = meta.get("pages")
         origin_path = str(meta.get("path") or "").replace("\\", "/")
+        name = meta.get("source_title") or meta.get("name", "unknown")
+        if origin_path.startswith(".openkb/sources/confluence/") and not meta.get("source_title"):
+            source_path = meta.get("source_path")
+            if isinstance(source_path, str):
+                source_root = (kb_dir / "wiki" / "sources").resolve()
+                candidate = (kb_dir / source_path).resolve()
+                try:
+                    if candidate.is_file() and candidate.is_relative_to(source_root):
+                        with candidate.open("r", encoding="utf-8") as source_file:
+                            title = parse_frontmatter(source_file.read(65536)).get("title")
+                        if isinstance(title, str) and title.strip():
+                            name = title.strip()
+                except OSError:
+                    pass
         documents.append(
             {
                 "hash": file_hash,
-                "name": meta.get("source_title") or meta.get("name", "unknown"),
+                "name": name,
                 "type": raw_type,
                 "display_type": _display_type(raw_type),
                 "pages": pages if pages not in ("", 0) else None,

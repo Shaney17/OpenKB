@@ -377,6 +377,28 @@ class TestProjectInventory:
         )
         assert project_inventory(kb)["documents"][0]["name"] == "Quy trình phê duyệt khoản vay"
 
+    def test_legacy_confluence_document_uses_markdown_title(self, tmp_path):
+        kb = _project_kb(tmp_path / "kb", {"PM": {}})
+        child = kb / ".openkb" / "spaces" / "pm"
+        source = child / "wiki" / "sources" / "legacy.md"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('---\ntitle: "Tên page cũ"\n---\n\n# Nội dung\n', encoding="utf-8")
+        (child / ".openkb" / "hashes.json").write_text(
+            json.dumps(
+                {
+                    "h1": {
+                        "name": "confluence-site-pm-123.md",
+                        "doc_name": "legacy",
+                        "type": "md",
+                        "path": ".openkb/sources/confluence/site/pm/page.md",
+                        "source_path": "wiki/sources/legacy.md",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert project_inventory(kb)["documents"][0]["name"] == "Tên page cũ"
+
     def test_plain_kb_inventory_is_untouched(self, tmp_path):
         """Federation is project-only; a normal KB keeps bare stems."""
         kb = _plain_kb(tmp_path / "kb")

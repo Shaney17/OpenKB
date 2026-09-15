@@ -82,6 +82,34 @@ def test_document_source_uses_confluence_page_title(monkeypatch, kb_dir):
     assert resp.json()["name"] == "Quy trình phê duyệt khoản vay"
 
 
+def test_legacy_confluence_document_reads_title_from_saved_markdown(monkeypatch, kb_dir):
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    _write_hashes(
+        kb_dir,
+        {
+            "legacy": {
+                "name": "confluence-site-pm-123.md",
+                "doc_name": "confluence-site-pm-123",
+                "type": "md",
+                "path": ".openkb/sources/confluence/site/pm/confluence-site-pm-123.md",
+                "source_path": "wiki/sources/confluence-site-pm-123.md",
+            }
+        },
+    )
+    (kb_dir / "wiki" / "sources" / "confluence-site-pm-123.md").write_text(
+        '---\ntitle: "Tên page từ Confluence"\npage_id: "123"\n---\n\n# Nội dung\n',
+        encoding="utf-8",
+    )
+
+    resp = client.post(
+        "/api/v1/document/source", json={"kb": kb, "hash": "legacy"}, headers=_auth()
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Tên page từ Confluence"
+
+
 def test_document_source_long_json_concatenates_pages(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)

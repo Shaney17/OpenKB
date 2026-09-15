@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from openkb.cli import _LONG_DOC_TYPES
+from openkb.frontmatter import parse as parse_frontmatter
 from openkb.state import HashRegistry
 
 
@@ -84,9 +85,20 @@ def read_document_source(kb_dir: Path, file_hash: str) -> dict[str, Any] | None:
         content = source.read_text(encoding="utf-8")
         page_count = None
 
+    display_name = meta.get("source_title") or meta.get("name", doc_name)
+    origin_path = str(meta.get("path") or "").replace("\\", "/")
+    if (
+        not meta.get("source_title")
+        and origin_path.startswith(".openkb/sources/confluence/")
+        and source.suffix == ".md"
+    ):
+        title = parse_frontmatter(content).get("title")
+        if isinstance(title, str) and title.strip():
+            display_name = title.strip()
+
     return {
         "hash": file_hash,
-        "name": meta.get("source_title") or meta.get("name", doc_name),
+        "name": display_name,
         "doc_name": doc_name,
         "type": meta.get("type", "unknown"),
         "format": "markdown",
