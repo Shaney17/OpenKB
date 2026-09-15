@@ -112,6 +112,29 @@ def test_storage_to_markdown_preserves_useful_structure():
     assert "[Attachment: diagram.png]" in rendered
 
 
+def test_storage_to_markdown_formats_nested_lists_tables_and_ignores_macro_parameters():
+    storage = (
+        "<ul><li><p>Parent item</p><ul><li><p>Child item</p></li></ul></li></ul>"
+        "<table><tr><th>Name</th><th>Status</th></tr>"
+        "<tr><td>Loan</td><td><strong>Active</strong></td></tr></table>"
+        '<ac:structured-macro ac:name="roadmap">'
+        '<ac:parameter ac:name="data">true%7Bhuge-machine-payload</ac:parameter>'
+        "</ac:structured-macro>"
+    )
+
+    rendered = storage_to_markdown(storage)
+
+    assert "- Parent item" in rendered
+    assert "  - Child item" in rendered
+    assert "| Name | Status |" in rendered
+    assert "| Loan | **Active** |" in rendered
+    assert "huge-machine-payload" not in rendered
+
+
+def test_storage_to_markdown_repairs_legacy_smart_quote_mojibake():
+    assert storage_to_markdown("<p>Weâve updated it</p>") == "We’ve updated it"
+
+
 def test_sync_is_incremental_and_token_is_never_persisted(tmp_path):
     (tmp_path / ".openkb").mkdir()
     (tmp_path / ".openkb" / "hashes.json").write_text("{}")

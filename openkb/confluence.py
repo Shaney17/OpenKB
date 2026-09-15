@@ -21,6 +21,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, TypeAlias
 
+from markdownify import markdownify
+
 from openkb.locks import atomic_write_json, atomic_write_text
 from openkb.state import HashRegistry
 
@@ -322,10 +324,76 @@ class _StorageToMarkdown(HTMLParser):
 
 
 def storage_to_markdown(storage: str) -> str:
-    parser = _StorageToMarkdown()
-    parser.feed(storage)
-    parser.close()
-    return parser.markdown()
+    """Convert Confluence storage XHTML into readable GitHub-style Markdown.
+
+    ``markdownify`` handles nested lists and tables substantially better than
+    the original streaming fallback. Confluence-specific XML elements are
+    normalized first so useful page/attachment references survive while opaque
+    macro parameters (roadmap JSON, layout configuration, etc.) do not leak
+    into the document body.
+    """
+
+    def attr(tag: str, name: str) -> str:
+        match = re.search(rf'\b(?:\w+:)?{re.escape(name)}=["\']([^"\']*)["\']', tag, re.I)
+        return match.group(1) if match else ""
+
+    prepared = storage
+    prepared = re.sub(
+        r"<ri:page\b[^>]*/?>",
+        lambda match: attr(match.group(0), "content-title"),
+        prepared,
+        flags=re.I,
+    )
+    prepared = re.sub(
+        r"<ri:attachment\b[^>]*/?>",
+        lambda match: (
+            f"[Attachment: {attr(match.group(0), 'filename')}]"
+            if attr(match.group(0), "filename")
+            else ""
+        ),
+        prepared,
+        flags=re.I,
+    )
+    prepared = re.sub(
+        r"<ac:emoticon\b[^>]*/?>",
+        lambda match: attr(match.group(0), "emoji-shortname") or attr(match.group(0), "name"),
+        prepared,
+        flags=re.I,
+    )
+    # Parameters are machine configuration, not page prose. Removing them also
+    # prevents large percent-encoded roadmap payloads from polluting search.
+    prepared = re.sub(r"<ac:parameter\b[^>]*>[\s\S]*?</ac:parameter\s*>", "", prepared, flags=re.I)
+    # Plain-text bodies use CDATA; preserve the label and drop only wrappers.
+    prepared = re.sub(r"<!\[CDATA\[([\s\S]*?)\]\]>", r"\1", prepared)
+
+    text = markdownify(
+        prepared,
+        heading_style="ATX",
+        bullets="-",
+        strip=["ac:structured-macro", "ac:rich-text-body", "ac:link"],
+    )
+    # Repair common UTF-8-as-Latin-1 sequences found in legacy Confluence
+    # templates without touching correctly decoded Vietnamese/emoji text.
+    replacements = {
+        "â": "’",
+        "â€™": "’",
+        "â": "‘",
+        "â€˜": "‘",
+        "â": "“",
+        "â€œ": "“",
+        "â": "”",
+        "â€": "”",
+        "â": "–",
+        "â€“": "–",
+        "â": "—",
+        "â€”": "—",
+        "Â ": " ",
+    }
+    for broken, repaired in replacements.items():
+        text = text.replace(broken, repaired)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def render_page(page: ConfluencePage) -> str:

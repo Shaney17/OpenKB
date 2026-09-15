@@ -874,6 +874,7 @@ function UploadStatusIcon({ status }: { status: UploadStatus }) {
  * ingestion artifacts, so there is no edit affordance. */
 function DocumentReaderDrawer({
   doc,
+  title,
   body,
   loading,
   error,
@@ -882,6 +883,7 @@ function DocumentReaderDrawer({
   onClose,
 }: {
   doc: WikiDocument | null
+  title: string | null
   body: ReactNode
   loading: boolean
   error: string | null
@@ -952,7 +954,7 @@ function DocumentReaderDrawer({
                   </span>
                   <div className="min-w-0">
                     <Dialog.Title asChild>
-                      <div className="truncate text-[13.5px] font-medium text-foreground">{shown?.name}</div>
+                      <div className="truncate text-[13.5px] font-medium text-foreground">{title || shown?.name}</div>
                     </Dialog.Title>
                     <div className="mt-0.5 flex items-center gap-2 text-[12px] text-muted-foreground">
                       {shown?.display_type && <span>{shown.display_type}</span>}
@@ -1109,6 +1111,12 @@ function DocumentsPane({
     [documentMarkdown],
   )
   const readerEmpty = docSource != null && documentMarkdown.trim().length === 0
+  const documentTitle = useMemo(() => {
+    const apiTitle = docSource?.name?.trim()
+    if (apiTitle && !apiTitle.startsWith('confluence-')) return apiTitle
+    const heading = /^#\s+(.+)$/m.exec(documentMarkdown)?.[1]?.trim()
+    return heading || apiTitle || openDoc?.name || null
+  }, [docSource, documentMarkdown, openDoc])
 
   const handleDelete = async (name: string) => {
     setDeletingName(name)
@@ -1299,6 +1307,7 @@ function DocumentsPane({
     </div>
     <DocumentReaderDrawer
       doc={openDoc}
+      title={documentTitle}
       body={readerBody}
       loading={docLoading}
       error={docError}
